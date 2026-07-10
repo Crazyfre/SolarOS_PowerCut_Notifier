@@ -45,7 +45,10 @@
         {
           "icon": "./assets/icon.png",
           "color": "#F59E0B",
-          "defaultChannel": "default"
+          "defaultChannel": "default",
+          "sounds": [
+            "./assets/alarm.wav"
+          ]
         }
       ],
       "expo-font",
@@ -55,7 +58,8 @@
         {
           "backgroundFetchEnabled": true
         }
-      ]
+      ],
+      "expo-splash-screen"
     ],
     "extra": {
       "apiBaseUrl": "https://eu1.solaros.com",

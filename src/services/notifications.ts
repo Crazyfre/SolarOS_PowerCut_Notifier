@@ -51,6 +51,13 @@ export async function requestNotificationPermissions(): Promise<boolean> {
       vibrationPattern: [0, 200, 100, 200],
       lightColor: '#EF4444',
     });
+    await Notifications.setNotificationChannelAsync('solarguard_alarm', {
+      name: 'Power Cut Alarms',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 500, 250, 500, 250, 500],
+      lightColor: '#EF4444',
+      sound: 'alarm.wav',
+    });
   }
 
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -90,9 +97,9 @@ export async function sendPowerCutNotification(
       `Your home is now running on battery backup.\n` +
       `Battery: ${soc}% · Load: ${load}W`,
     data: { type: 'POWER_CUT' },
-    sound: true,
+    sound: 'alarm.wav',
     color: '#EF4444',
-    ...(Platform.OS === 'android' && { channelId: 'solarguard' }),
+    ...(Platform.OS === 'android' && { channelId: 'solarguard_alarm' }),
   });
 }
 
@@ -143,9 +150,9 @@ export async function sendBatteryCriticalNotification(soc: number): Promise<void
     title: '🚨 Battery Critical',
     body: `Battery at ${soc}% — shutdown imminent if grid doesn't restore soon.`,
     data: { type: 'BATTERY_CRITICAL', soc },
-    sound: true,
+    sound: 'alarm.wav',
     color: '#EF4444',
-    ...(Platform.OS === 'android' && { channelId: 'solarguard' }),
+    ...(Platform.OS === 'android' && { channelId: 'solarguard_alarm' }),
   });
 }
 
