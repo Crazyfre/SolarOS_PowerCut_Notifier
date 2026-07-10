@@ -8,19 +8,10 @@ on:
 
   # Also allow manual trigger from GitHub Actions UI
   workflow_dispatch:
-    inputs:
-      profile:
-        description: 'EAS build profile'
-        required: true
-        default: 'preview'
-        type: choice
-        options:
-          - preview
-          - production
 
 jobs:
   build:
-    name: Build Android APK
+    name: Build Android APK locally on GitHub
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -37,59 +28,38 @@ jobs:
           node-version: '24'
           cache: 'npm'
 
-      # ── 3. Install dependencies ───────────────────────────────────────────
+      # ── 3. Set up Java for Android build ──────────────────────────────────
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      # ── 4. Install dependencies ───────────────────────────────────────────
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
-      # ── 4. Set up EAS CLI ─────────────────────────────────────────────────
-      - name: Set up EAS CLI
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+      # ── 5. Generate Native Android Code (Prebuild) ────────────────────────
+      - name: Expo Prebuild
+        run: npx expo prebuild --platform android --clean
 
-      # ── 5. Determine build profile ────────────────────────────────────────
-      - name: Determine build profile
-        id: profile
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "profile=${{ github.event.inputs.profile }}" >> $GITHUB_OUTPUT
-          else
-            echo "profile=preview" >> $GITHUB_OUTPUT
-          fi
+      # ── 6. Build the APK using Gradle ─────────────────────────────────────
+      - name: Build Android APK
+        working-directory: android
+        run: ./gradlew assembleDebug
 
-      # ── 6. Build APK via EAS ──────────────────────────────────────────────
-      - name: Build Android APK (EAS)
-        run: |
-          eas build \
-            --platform android \
-            --profile ${{ steps.profile.outputs.profile }} \
-            --non-interactive \
-            --no-wait
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
-      # ── 7. Wait for build and download artifact ───────────────────────────
-      - name: Wait for build and get download URL
-        id: build_url
-        run: |
-          echo "Build submitted to EAS. Check https://expo.dev for build status."
-          echo "APK download link will appear in the EAS dashboard when complete."
-
-      # ── 8. Create GitHub Release (on tag push) ────────────────────────────
+      # ── 7. Create GitHub Release and Upload APK ───────────────────────────
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           name: SolarGuard ${{ github.ref_name }}
+          files: android/app/build/outputs/apk/debug/app-debug.apk
           body: |
             ## SolarGuard ${{ github.ref_name }}
 
-            ### What's new
-            <!-- Add release notes here -->
-
             ### Installing
-            1. Download the APK from the [EAS Build dashboard](https://expo.dev)
+            1. Download the `app-debug.apk` file attached below
             2. Transfer to your Android phone
             3. Enable "Install from unknown sources" in Settings
             4. Install the APK
