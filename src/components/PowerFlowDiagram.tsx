@@ -85,13 +85,13 @@ export function PowerFlowDiagram({
   const isDischarging = batteryStatus === 'DISCHARGE';
   const isCharging = batteryStatus === 'CHARGE';
 
-  // Node positions (relative to a 280×200 canvas)
+  // Node positions (relative to a 280×230 canvas) forming a perfect symmetric cross (90px spacing)
   const nodes = {
-    grid: { x: 30, y: 100 },
-    solar: { x: 140, y: 28 }, // Moved down slightly to fit labels nicely
-    inverter: { x: 140, y: 105 },
-    battery: { x: 140, y: 180 },
-    house: { x: 250, y: 105 },
+    grid: { x: 50, y: 115 },
+    solar: { x: 140, y: 25 },
+    inverter: { x: 140, y: 115 },
+    battery: { x: 140, y: 205 },
+    house: { x: 230, y: 115 },
   };
 
   const gridColor = gridOn ? Colors.success : Colors.danger;
