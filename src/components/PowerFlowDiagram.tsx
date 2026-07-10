@@ -13,6 +13,7 @@ import Svg, {
   LinearGradient as SvgLinearGradient,
   Stop,
   Path,
+  Rect,
 } from 'react-native-svg';
 import { Colors, Typography, Spacing } from '../theme';
 
@@ -25,23 +26,29 @@ interface PowerFlowProps {
   batterySoc?: number;
 }
 
-// Flow dot component that animates along a path
-function FlowDot({ color, x1, y1, x2, y2, delay = 0 }: {
+// Flow dot component that animates along a path with symmetric speed
+function FlowDot({ color, x1, y1, x2, y2, delay = 0, speed = 45 }: {
   color: string;
   x1: number; y1: number;
   x2: number; y2: number;
   delay?: number;
+  speed?: number; // Pixels per second
 }) {
   const anim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const duration = (distance / speed) * 1000;
+
     const loop = Animated.loop(
       Animated.sequence([
         Animated.delay(delay),
         Animated.timing(anim, {
           toValue: 1,
-          duration: 1800,
-          easing: Easing.inOut(Easing.ease),
+          duration: duration,
+          easing: Easing.linear,
           useNativeDriver: false,
         }),
         Animated.timing(anim, { toValue: 0, duration: 0, useNativeDriver: false }),
@@ -49,7 +56,7 @@ function FlowDot({ color, x1, y1, x2, y2, delay = 0 }: {
     );
     loop.start();
     return () => loop.stop();
-  }, []);
+  }, [x1, y1, x2, y2, speed, delay]);
 
   const cx = anim.interpolate({ inputRange: [0, 1], outputRange: [x1, x2] });
   const cy = anim.interpolate({ inputRange: [0, 1], outputRange: [y1, y2] });
@@ -81,10 +88,10 @@ export function PowerFlowDiagram({
   // Node positions (relative to a 280×200 canvas)
   const nodes = {
     grid: { x: 30, y: 100 },
-    solar: { x: 140, y: 20 },
-    inverter: { x: 140, y: 100 },
+    solar: { x: 140, y: 28 }, // Moved down slightly to fit labels nicely
+    inverter: { x: 140, y: 105 },
     battery: { x: 140, y: 180 },
-    house: { x: 250, y: 100 },
+    house: { x: 250, y: 105 },
   };
 
   const gridColor = gridOn ? Colors.success : Colors.danger;
@@ -97,87 +104,133 @@ export function PowerFlowDiagram({
       <View style={styles.diagram}>
         {/* Fixed coordinate wrapper to align absolute dots and labels with SVG */}
         <View style={styles.canvas}>
-          <Svg width="280" height="200" viewBox="0 0 280 200">
-            <Defs>
-              <SvgLinearGradient id="gridGrad" x1="0" y1="0" x2="1" y2="0">
-                <Stop offset="0" stopColor={gridColor} stopOpacity="0.8" />
-                <Stop offset="1" stopColor={Colors.amber} stopOpacity="0.8" />
-              </SvgLinearGradient>
-            </Defs>
-
+          <Svg width="280" height="230" viewBox="0 0 280 230">
             {/* Connection lines */}
-            {/* Grid → Inverter */}
+            {/* Grid ↔ Inverter */}
             <Line
               x1={nodes.grid.x + 18} y1={nodes.grid.y}
-              x2={nodes.inverter.x - 18} y2={nodes.inverter.y}
-              stroke={gridOn ? Colors.success + '60' : Colors.danger + '40'}
+              x2={nodes.inverter.x - 20} y2={nodes.inverter.y}
+              stroke={gridOn ? Colors.success + '40' : Colors.danger + '20'}
               strokeWidth="2"
-              strokeDasharray="6,4"
+              strokeDasharray="5,4"
             />
             {/* Solar → Inverter */}
             <Line
               x1={nodes.solar.x} y1={nodes.solar.y + 16}
-              x2={nodes.inverter.x} y2={nodes.inverter.y - 18}
-              stroke={solarColor + '60'}
+              x2={nodes.inverter.x} y2={nodes.inverter.y - 20}
+              stroke={pvPower > 0 ? Colors.amber + '40' : Colors.textMuted + '20'}
               strokeWidth="2"
-              strokeDasharray="6,4"
+              strokeDasharray="5,4"
             />
             {/* Inverter → House */}
             <Line
-              x1={nodes.inverter.x + 18} y1={nodes.inverter.y}
+              x1={nodes.inverter.x + 20} y1={nodes.inverter.y}
               x2={nodes.house.x - 18} y2={nodes.house.y}
-              stroke={Colors.amber + '60'}
+              stroke={usePower > 0 ? Colors.amber + '40' : Colors.textMuted + '20'}
               strokeWidth="2"
-              strokeDasharray="6,4"
+              strokeDasharray="5,4"
             />
             {/* Inverter ↔ Battery */}
             <Line
-              x1={nodes.inverter.x} y1={nodes.inverter.y + 18}
+              x1={nodes.inverter.x} y1={nodes.inverter.y + 20}
               x2={nodes.battery.x} y2={nodes.battery.y - 16}
-              stroke={batteryColor + '60'}
+              stroke={batteryColor + '40'}
               strokeWidth="2"
-              strokeDasharray="6,4"
+              strokeDasharray="5,4"
             />
 
             {/* Node: Grid */}
             <Circle cx={nodes.grid.x} cy={nodes.grid.y} r="18" fill={Colors.surfaceElevated} stroke={gridColor} strokeWidth="2" />
+            {/* SVG Plug Icon for Grid */}
+            <Path
+              d={`M ${nodes.grid.x - 4} ${nodes.grid.y - 6} h 8 v 6 a 4 4 0 0 1 -8 0 z M ${nodes.grid.x - 2} ${nodes.grid.y - 10} v 4 M ${nodes.grid.x + 2} ${nodes.grid.y - 10} v 4 M ${nodes.grid.x} ${nodes.grid.y + 4} v 6`}
+              stroke={gridColor}
+              strokeWidth="1.5"
+              fill="none"
+            />
+
             {/* Node: Solar */}
             <Circle cx={nodes.solar.x} cy={nodes.solar.y} r="16" fill={Colors.surfaceElevated} stroke={solarColor} strokeWidth="2" />
+            {/* SVG Sun Icon for Solar */}
+            <Circle cx={nodes.solar.x} cy={nodes.solar.y} r="6" fill="none" stroke={solarColor} strokeWidth="1.5" />
+            <Path
+              d={`M ${nodes.solar.x} ${nodes.solar.y - 10} v 2 M ${nodes.solar.x} ${nodes.solar.y + 8} v 2 M ${nodes.solar.x - 10} ${nodes.solar.y} h 2 M ${nodes.solar.x + 8} ${nodes.solar.y} h 2 M ${nodes.solar.x - 7} ${nodes.solar.y - 7} l 1.5 1.5 M ${nodes.solar.x + 5.5} ${nodes.solar.y + 5.5} l 1.5 1.5 M ${nodes.solar.x - 7} ${nodes.solar.y + 7} l 1.5 -1.5 M ${nodes.solar.x + 5.5} ${nodes.solar.y - 5.5} l 1.5 -1.5`}
+              stroke={solarColor}
+              strokeWidth="1.5"
+            />
+
             {/* Node: Inverter (center hub) */}
             <Circle cx={nodes.inverter.x} cy={nodes.inverter.y} r="20" fill={Colors.surface} stroke={Colors.amber} strokeWidth="2.5" />
+            {/* SVG Inverter Sine/Wave Icon */}
+            <Path
+              d={`M ${nodes.inverter.x - 10} ${nodes.inverter.y} q 5 -6 10 0 t 10 0`}
+              stroke={Colors.amber}
+              strokeWidth="2"
+              fill="none"
+            />
+            <Path
+              d={`M ${nodes.inverter.x - 8} ${nodes.inverter.y + 5} h 16`}
+              stroke={Colors.textMuted}
+              strokeWidth="1.5"
+              strokeDasharray="2,2"
+            />
+
             {/* Node: Battery */}
             <Circle cx={nodes.battery.x} cy={nodes.battery.y} r="16" fill={Colors.surfaceElevated} stroke={batteryColor} strokeWidth="2" />
+            {/* SVG Battery Icon */}
+            <Rect x={nodes.battery.x - 6} y={nodes.battery.y - 8} width="12" height="16" rx="2" fill="none" stroke={batteryColor} strokeWidth="1.5" />
+            <Rect x={nodes.battery.x - 2} y={nodes.battery.y - 11} width="4" height="3" fill={batteryColor} />
+            {/* Dynamic Charge Fill Bar */}
+            {batterySoc > 0 && (
+              <Rect
+                x={nodes.battery.x - 4}
+                y={nodes.battery.y - 6 + (12 - 12 * (batterySoc / 100))}
+                width="8"
+                height={12 * (batterySoc / 100)}
+                fill={batteryColor}
+                opacity="0.8"
+              />
+            )}
+
             {/* Node: House */}
             <Circle cx={nodes.house.x} cy={nodes.house.y} r="18" fill={Colors.surfaceElevated} stroke={Colors.amberLight} strokeWidth="2" />
+            {/* SVG House Icon */}
+            <Path
+              d={`M ${nodes.house.x - 8} ${nodes.house.y + 6} v -7 l 8 -6 l 8 6 v 7 z`}
+              stroke={Colors.amberLight}
+              strokeWidth="1.5"
+              fill="none"
+            />
+            <Rect x={nodes.house.x - 2} y={nodes.house.y + 1} width="4" height="5" fill="none" stroke={Colors.amberLight} strokeWidth="1" />
           </Svg>
 
-          {/* Overlay labels */}
-          <View style={[styles.nodeLabel, { left: nodes.grid.x - 20, top: nodes.grid.y + 20, width: 40 }]}>
-            <Text style={styles.nodeLabelText}>{gridOn ? '🔌' : '❌'}</Text>
+          {/* Overlay text labels below/above nodes */}
+          <View style={[styles.nodeLabel, { left: nodes.grid.x - 30, top: nodes.grid.y + 20, width: 60 }]}>
             <Text style={styles.nodeLabelTitle}>Grid</Text>
+            {gridOn && wirePower > 0 && <Text style={styles.subText}>{wirePower}W</Text>}
           </View>
-          <View style={[styles.nodeLabel, { left: nodes.solar.x - 25, top: nodes.solar.y + 18, width: 50 }]}>
-            <Text style={styles.nodeLabelText}>☀️</Text>
-            <Text style={styles.nodeLabelTitle}>{pvPower > 0 ? `${pvPower}W` : 'Solar'}</Text>
+          <View style={[styles.nodeLabel, { left: nodes.solar.x - 30, top: nodes.solar.y - 28, width: 60 }]}>
+            <Text style={styles.nodeLabelTitle}>Solar</Text>
+            {pvPower > 0 && <Text style={styles.subText}>{pvPower}W</Text>}
           </View>
-          <View style={[styles.nodeLabel, { left: nodes.inverter.x - 25, top: nodes.inverter.y - 18, width: 50 }]}>
-            <Text style={styles.nodeLabelTitle}>⚡ INV</Text>
+          <View style={[styles.nodeLabel, { left: nodes.inverter.x - 30, top: nodes.inverter.y + 22, width: 60 }]}>
+            <Text style={styles.nodeLabelTitle}>Inverter</Text>
           </View>
-          <View style={[styles.nodeLabel, { left: nodes.battery.x - 25, top: nodes.battery.y + 18, width: 50 }]}>
-            <Text style={styles.nodeLabelText}>🔋</Text>
-            <Text style={styles.nodeLabelTitle}>{batterySoc}%</Text>
+          <View style={[styles.nodeLabel, { left: nodes.battery.x - 30, top: nodes.battery.y + 18, width: 60 }]}>
+            <Text style={styles.nodeLabelTitle}>Battery</Text>
+            <Text style={styles.subText}>{batterySoc}%</Text>
           </View>
-          <View style={[styles.nodeLabel, { left: nodes.house.x - 25, top: nodes.house.y + 20, width: 50 }]}>
-            <Text style={styles.nodeLabelText}>🏠</Text>
-            <Text style={styles.nodeLabelTitle}>{usePower > 0 ? `${usePower}W` : 'Home'}</Text>
+          <View style={[styles.nodeLabel, { left: nodes.house.x - 30, top: nodes.house.y + 20, width: 60 }]}>
+            <Text style={styles.nodeLabelTitle}>Load</Text>
+            {usePower > 0 && <Text style={styles.subText}>{usePower}W</Text>}
           </View>
 
-          {/* Animated flow dots */}
-          {gridOn && (
+          {/* Animated flow dots (symmetric speed) */}
+          {gridOn && wirePower > 0 && (
             <FlowDot
               color={Colors.success}
               x1={nodes.grid.x + 18} y1={nodes.grid.y}
-              x2={nodes.inverter.x - 18} y2={nodes.inverter.y}
+              x2={nodes.inverter.x - 20} y2={nodes.inverter.y}
               delay={0}
             />
           )}
@@ -185,28 +238,30 @@ export function PowerFlowDiagram({
             <FlowDot
               color={Colors.amberLight}
               x1={nodes.solar.x} y1={nodes.solar.y + 16}
-              x2={nodes.inverter.x} y2={nodes.inverter.y - 18}
+              x2={nodes.inverter.x} y2={nodes.inverter.y - 20}
               delay={100}
             />
           )}
-          <FlowDot
-            color={Colors.amber}
-            x1={nodes.inverter.x + 18} y1={nodes.inverter.y}
-            x2={nodes.house.x - 18} y2={nodes.house.y}
-            delay={300}
-          />
+          {usePower > 0 && (
+            <FlowDot
+              color={Colors.amber}
+              x1={nodes.inverter.x + 20} y1={nodes.inverter.y}
+              x2={nodes.house.x - 18} y2={nodes.house.y}
+              delay={300}
+            />
+          )}
           {isDischarging && (
             <FlowDot
-              color={Colors.amberLight}
+              color={Colors.amber}
               x1={nodes.battery.x} y1={nodes.battery.y - 16}
-              x2={nodes.inverter.x} y2={nodes.inverter.y + 18}
+              x2={nodes.inverter.x} y2={nodes.inverter.y + 20}
               delay={150}
             />
           )}
           {isCharging && (
             <FlowDot
               color={Colors.blue}
-              x1={nodes.inverter.x} y1={nodes.inverter.y + 18}
+              x1={nodes.inverter.x} y1={nodes.inverter.y + 20}
               x2={nodes.battery.x} y2={nodes.battery.y - 16}
               delay={150}
             />
@@ -243,10 +298,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  nodeLabelText: {
-    fontSize: 14,
-  },
   nodeLabelTitle: {
+    fontFamily: Typography.fontFamily.semiBold,
+    fontSize: 10,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  subText: {
     fontFamily: Typography.fontFamily.medium,
     fontSize: 9,
     color: Colors.textSecondary,
