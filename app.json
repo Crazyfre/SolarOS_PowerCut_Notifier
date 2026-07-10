@@ -1,25 +1,67 @@
 {
   "expo": {
-    "name": "SolarOS",
-    "slug": "SolarOS",
+    "name": "SolarGuard",
+    "slug": "solarguard",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0E1A"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "fetch"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "monochromeImage": "./assets/android-icon-monochrome.png",
+        "backgroundColor": "#0A0E1A"
       },
-      "predictiveBackGestureEnabled": false
+      "permissions": [
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.INTERNET",
+        "android.permission.WAKE_LOCK"
+      ],
+      "package": "com.solarguard.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-dev-client",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#F59E0B",
+          "defaultChannel": "default"
+        }
+      ],
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-background-fetch",
+        {
+          "backgroundFetchEnabled": true
+        }
+      ]
+    ],
+    "extra": {
+      "apiBaseUrl": "https://eu1.solaros.com",
+      "eas": {
+        "projectId": "d0184898-6a62-43f9-9553-b61aba9236ca"
+      }
     }
   }
 }
