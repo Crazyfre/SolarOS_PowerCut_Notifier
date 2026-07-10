@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createStackNavigator } from '@react-navigation/stack';
 import { Text, View, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -8,18 +9,52 @@ import { AppContextProvider, useApp } from './src/context/AppContext';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { HistoryScreen } from './src/screens/HistoryScreen';
+import { SettingsScreen } from './src/screens/SettingsScreen';
 import { Colors, Typography, Spacing } from './src/theme';
 
 // Import background task definition so it registers at module load
 import './src/services/backgroundFetch';
 
 const Tab = createBottomTabNavigator();
+const Stack = createStackNavigator();
 
 function TabIcon({ icon, focused }: { icon: string; focused: boolean }) {
   return (
     <View style={[tabStyles.iconWrap, focused && tabStyles.iconWrapActive]}>
       <Text style={[tabStyles.icon, focused && tabStyles.iconActive]}>{icon}</Text>
     </View>
+  );
+}
+
+function MainTabs() {
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: styles.tabBar,
+        tabBarActiveTintColor: Colors.amber,
+        tabBarInactiveTintColor: Colors.textMuted,
+        tabBarShowLabel: true,
+        tabBarLabelStyle: styles.tabBarLabel,
+      }}
+    >
+      <Tab.Screen
+        name="Dashboard"
+        component={DashboardScreen}
+        options={{
+          tabBarIcon: ({ focused }) => <TabIcon icon="⚡" focused={focused} />,
+          tabBarLabel: 'Dashboard',
+        }}
+      />
+      <Tab.Screen
+        name="History"
+        component={HistoryScreen}
+        options={{
+          tabBarIcon: ({ focused }) => <TabIcon icon="📋" focused={focused} />,
+          tabBarLabel: 'History',
+        }}
+      />
+    </Tab.Navigator>
   );
 }
 
@@ -64,33 +99,10 @@ function AppNavigator() {
         },
       }}
     >
-      <Tab.Navigator
-        screenOptions={{
-          headerShown: false,
-          tabBarStyle: styles.tabBar,
-          tabBarActiveTintColor: Colors.amber,
-          tabBarInactiveTintColor: Colors.textMuted,
-          tabBarShowLabel: true,
-          tabBarLabelStyle: styles.tabBarLabel,
-        }}
-      >
-        <Tab.Screen
-          name="Dashboard"
-          component={DashboardScreen}
-          options={{
-            tabBarIcon: ({ focused }) => <TabIcon icon="⚡" focused={focused} />,
-            tabBarLabel: 'Dashboard',
-          }}
-        />
-        <Tab.Screen
-          name="History"
-          component={HistoryScreen}
-          options={{
-            tabBarIcon: ({ focused }) => <TabIcon icon="📋" focused={focused} />,
-            tabBarLabel: 'History',
-          }}
-        />
-      </Tab.Navigator>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="MainTabs" component={MainTabs} />
+        <Stack.Screen name="Settings" component={SettingsScreen} />
+      </Stack.Navigator>
     </NavigationContainer>
   );
 }

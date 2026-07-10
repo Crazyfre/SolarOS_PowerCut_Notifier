@@ -1,13 +1,10 @@
 import * as Notifications from 'expo-notifications';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
-import { TelemetryData } from '../types/telemetry';
+import { TelemetryData, AppSettings } from '../types/telemetry';
+import { DEFAULT_SETTINGS } from '../storage/settingsStore';
 
 // ─── Expo Go guard ────────────────────────────────────────────────────────────
-// expo-notifications push/local features are unavailable in Expo Go since SDK 53.
-// All notification calls are no-ops when running inside Expo Go, so the app
-// doesn't crash during development — full functionality requires a dev build.
-
 const isExpoGo =
   Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
@@ -23,12 +20,8 @@ if (!isExpoGo) {
   });
 }
 
-// ─── Permission request ───────────────────────────────────────────────────────
+// ─── Permission & Channel Setup ───────────────────────────────────────────────
 
-/**
- * Request notification permissions from the OS.
- * Returns true if granted (or false if in Expo Go where they're unavailable).
- */
 export async function requestNotificationPermissions(): Promise<boolean> {
   if (isExpoGo) {
     console.info(
@@ -39,22 +32,43 @@ export async function requestNotificationPermissions(): Promise<boolean> {
   }
 
   if (Platform.OS === 'android') {
+    // 1. Standard Alerts (High importance, system sound)
     await Notifications.setNotificationChannelAsync('solarguard', {
       name: 'SolarGuard Alerts',
-      importance: Notifications.AndroidImportance.MAX,
+      importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#F59E0B',
     });
+
+    // 2. Battery Warnings (High importance, system sound)
     await Notifications.setNotificationChannelAsync('solarguard_low', {
       name: 'Battery Warnings',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 200, 100, 200],
       lightColor: '#EF4444',
     });
+
+    // 3. Silent Alerts (Default importance, system sound, no popup banner)
+    await Notifications.setNotificationChannelAsync('solarguard_silent', {
+      name: 'Silent Alerts',
+      importance: Notifications.AndroidImportance.DEFAULT,
+      lightColor: '#F59E0B',
+    });
+
+    // 4. Power Cut Alarms (Max importance, custom alarm sound, popup banner)
     await Notifications.setNotificationChannelAsync('solarguard_alarm', {
       name: 'Power Cut Alarms',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 500, 250, 500, 250, 500],
+      lightColor: '#EF4444',
+      sound: 'alarm.wav',
+    });
+
+    // 5. Silent Power Cut Alarms (Default importance, custom alarm sound, no popup)
+    await Notifications.setNotificationChannelAsync('solarguard_silent_alarm', {
+      name: 'Silent Power Cut Alarms',
+      importance: Notifications.AndroidImportance.DEFAULT,
+      vibrationPattern: [0, 500, 250, 500],
       lightColor: '#EF4444',
       sound: 'alarm.wav',
     });
@@ -73,23 +87,49 @@ async function scheduleNotification(
   content: Notifications.NotificationContentInput
 ): Promise<void> {
   if (isExpoGo) {
-    // Log to console so you can verify logic works during Expo Go testing
     console.info(`[SolarGuard Notification] ${content.title}: ${content.body}`);
     return;
   }
   await Notifications.scheduleNotificationAsync({ content, trigger: null });
 }
 
-// ─── Notification helpers ─────────────────────────────────────────────────────
+// ─── Dynamic routing helper ──────────────────────────────────────────────────
 
-/**
- * Power cut detected — grid went offline.
- */
+interface RouteConfig {
+  channelId: string;
+  sound: string | boolean;
+}
+
+function getNotificationRouting(
+  isCritical: boolean,
+  settings: AppSettings
+): RouteConfig {
+  const useAlarm = isCritical && settings.useAlarmSound;
+  const noPopup = settings.onlyAlarmNoPopup;
+
+  if (useAlarm) {
+    return {
+      channelId: noPopup ? 'solarguard_silent_alarm' : 'solarguard_alarm',
+      sound: 'alarm.wav',
+    };
+  }
+
+  // Standard sound path
+  return {
+    channelId: noPopup ? 'solarguard_silent' : 'solarguard',
+    sound: true,
+  };
+}
+
+// ─── Notification triggers ────────────────────────────────────────────────────
+
 export async function sendPowerCutNotification(
-  telemetry: TelemetryData
+  telemetry: TelemetryData,
+  settings: AppSettings = DEFAULT_SETTINGS
 ): Promise<void> {
   const soc = telemetry.batterySoc ?? 0;
   const load = telemetry.usePower ?? telemetry.dischargePower ?? 0;
+  const routing = getNotificationRouting(true, settings);
 
   await scheduleNotification({
     title: '⚡ Power Cut Detected',
@@ -97,71 +137,103 @@ export async function sendPowerCutNotification(
       `Your home is now running on battery backup.\n` +
       `Battery: ${soc}% · Load: ${load}W`,
     data: { type: 'POWER_CUT' },
-    sound: 'alarm.wav',
+    sound: routing.sound as any,
     color: '#EF4444',
-    ...(Platform.OS === 'android' && { channelId: 'solarguard_alarm' }),
+    ...(Platform.OS === 'android' && { channelId: routing.channelId }),
   });
 }
 
-/**
- * Grid power restored after an outage.
- */
 export async function sendGridRestoredNotification(
   durationMs: number,
-  soc: number
+  soc: number,
+  settings: AppSettings = DEFAULT_SETTINGS
 ): Promise<void> {
   const minutes = Math.floor(durationMs / 60000);
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
   const durationStr = hours > 0 ? `${hours}h ${mins}m` : `${minutes} minutes`;
+  const routing = getNotificationRouting(false, settings);
 
   await scheduleNotification({
     title: '✅ Grid Power Restored',
     body: `Mains power is back. Outage lasted ${durationStr}.\nBattery remaining: ${soc}%`,
     data: { type: 'GRID_RESTORED', durationMs, soc },
-    sound: true,
+    sound: routing.sound as any,
     color: '#10B981',
-    ...(Platform.OS === 'android' && { channelId: 'solarguard' }),
+    ...(Platform.OS === 'android' && { channelId: routing.channelId }),
   });
 }
 
-/**
- * Battery SoC fell to warning level during an outage.
- */
 export async function sendBatteryLowNotification(
   soc: number,
-  loadW: number
+  loadW: number,
+  settings: AppSettings = DEFAULT_SETTINGS
 ): Promise<void> {
+  const routing = getNotificationRouting(false, settings);
+
   await scheduleNotification({
     title: '🔋 Battery Running Low',
     body: `Battery at ${soc}% — power cut ongoing. Load: ${loadW}W`,
     data: { type: 'BATTERY_LOW', soc, loadW },
-    sound: true,
+    sound: routing.sound as any,
     color: '#F59E0B',
-    ...(Platform.OS === 'android' && { channelId: 'solarguard_low' }),
+    ...(Platform.OS === 'android' && { channelId: routing.channelId }),
   });
 }
 
-/**
- * Battery SoC is critically low.
- */
-export async function sendBatteryCriticalNotification(soc: number): Promise<void> {
+export async function sendBatteryCriticalNotification(
+  soc: number,
+  settings: AppSettings = DEFAULT_SETTINGS
+): Promise<void> {
+  const routing = getNotificationRouting(true, settings);
+
   await scheduleNotification({
     title: '🚨 Battery Critical',
     body: `Battery at ${soc}% — shutdown imminent if grid doesn't restore soon.`,
     data: { type: 'BATTERY_CRITICAL', soc },
-    sound: 'alarm.wav',
+    sound: routing.sound as any,
     color: '#EF4444',
-    ...(Platform.OS === 'android' && { channelId: 'solarguard_alarm' }),
+    ...(Platform.OS === 'android' && { channelId: routing.channelId }),
+  });
+}
+
+// ─── Extra custom alerts ──────────────────────────────────────────────────────
+
+export async function sendOverSolarLoadNotification(
+  loadW: number,
+  pvPowerW: number,
+  settings: AppSettings = DEFAULT_SETTINGS
+): Promise<void> {
+  const routing = getNotificationRouting(false, settings);
+
+  await scheduleNotification({
+    title: '⚠️ Load Exceeds Solar Output',
+    body: `House consumption (${loadW}W) is higher than Solar Generation (${pvPowerW}W). Drawing remaining power from battery/grid.`,
+    data: { type: 'OVER_SOLAR_LOAD', loadW, pvPowerW },
+    sound: routing.sound as any,
+    color: '#F59E0B',
+    ...(Platform.OS === 'android' && { channelId: routing.channelId }),
+  });
+}
+
+export async function sendBatteryDischargingNotification(
+  loadW: number,
+  settings: AppSettings = DEFAULT_SETTINGS
+): Promise<void> {
+  const routing = getNotificationRouting(false, settings);
+
+  await scheduleNotification({
+    title: '🔋 System Discharging Battery',
+    body: `Your battery is currently discharging to power your home load of ${loadW}W.`,
+    data: { type: 'BATTERY_DISCHARGE', loadW },
+    sound: routing.sound as any,
+    color: '#F59E0B',
+    ...(Platform.OS === 'android' && { channelId: routing.channelId }),
   });
 }
 
 // ─── Expo Go notice helper ────────────────────────────────────────────────────
 
-/**
- * Returns true when running inside Expo Go (notifications unavailable).
- * Used by UI to show an informational banner.
- */
 export function isRunningInExpoGo(): boolean {
   return isExpoGo;
 }

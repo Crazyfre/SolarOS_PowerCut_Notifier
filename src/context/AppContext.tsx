@@ -11,7 +11,8 @@ import { AppState as RNAppState } from 'react-native';
 import { Store } from '../storage/secureStore';
 import { fetchTelemetry } from '../api/solar';
 import { detectAndAlert, loadOutageHistory } from '../services/stateDetector';
-import { TelemetryData, OutageRecord, AuthTokens } from '../types/telemetry';
+import { TelemetryData, OutageRecord, AuthTokens, AppSettings } from '../types/telemetry';
+import { SettingsStore, DEFAULT_SETTINGS } from '../storage/settingsStore';
 
 // ─── Context types ────────────────────────────────────────────────────────────
 
@@ -33,6 +34,10 @@ interface AppContextValue {
   // Outage history
   outageHistory: OutageRecord[];
   reloadHistory: () => Promise<void>;
+
+  // Settings
+  settings: AppSettings;
+  updateSettings: (newSettings: AppSettings) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -52,16 +57,20 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [outageHistory, setOutageHistory] = useState<OutageRecord[]>([]);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ─── Load initial auth state ──────────────────────────────────────────────
+  // ─── Load initial state (Auth & Settings) ──────────────────────────────────
 
   useEffect(() => {
     (async () => {
       try {
         const token = await Store.getAccessToken();
         const sid = await Store.getSystemId();
+        const storedSettings = await SettingsStore.loadSettings();
+        setSettings(storedSettings);
+
         if (token && sid) {
           setIsLoggedIn(true);
           setSystemId(sid);
@@ -84,7 +93,10 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
       const data = await fetchTelemetry(systemId);
       setTelemetry(data);
       setLastFetchTime(Date.now());
-      await detectAndAlert(data);
+      
+      // Pass the current user settings to detectAndAlert
+      await detectAndAlert(data, settings);
+      
       // Reload history in case a new outage was recorded
       const history = await loadOutageHistory();
       setOutageHistory(history);
@@ -94,7 +106,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsFetching(false);
     }
-  }, [systemId]);
+  }, [systemId, settings]);
 
   // ─── Foreground polling ───────────────────────────────────────────────────
 
@@ -128,7 +140,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
     return () => sub.remove();
   }, [isLoggedIn, systemId, refreshTelemetry]);
 
-  // ─── Auth actions ─────────────────────────────────────────────────────────
+  // ─── Actions ──────────────────────────────────────────────────────────────
 
   const login = useCallback(
     async (tokens: AuthTokens, sid: string, email: string) => {
@@ -162,6 +174,11 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
     setOutageHistory(history);
   }, []);
 
+  const updateSettings = useCallback(async (newSettings: AppSettings) => {
+    setSettings(newSettings);
+    await SettingsStore.saveSettings(newSettings);
+  }, []);
+
   // ─── Context value ────────────────────────────────────────────────────────
 
   return (
@@ -179,6 +196,8 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
         refreshTelemetry,
         outageHistory,
         reloadHistory,
+        settings,
+        updateSettings,
       }}
     >
       {children}

@@ -16,6 +16,8 @@ import { BatteryBar } from '../components/BatteryBar';
 import { StatusCard } from '../components/StatusCard';
 import { OutageAlert } from '../components/OutageAlert';
 import { PowerFlowDiagram } from '../components/PowerFlowDiagram';
+import { useNavigation } from '@react-navigation/native';
+import Svg, { Path } from 'react-native-svg';
 import { Store } from '../storage/secureStore';
 import { isRunningInExpoGo } from '../services/notifications';
 
@@ -27,7 +29,8 @@ function formatTime(ts: number | null): string {
 }
 
 export function DashboardScreen() {
-  const { telemetry, isFetching, fetchError, refreshTelemetry, lastFetchTime, logout } = useApp();
+  const { telemetry, isFetching, fetchError, refreshTelemetry, lastFetchTime } = useApp();
+  const navigation = useNavigation<any>();
   const [outageStart, setOutageStart] = useState<number | null>(null);
 
   // Load persisted outage start time
@@ -66,12 +69,15 @@ export function DashboardScreen() {
             />
           )}
           <TouchableOpacity
-            onPress={logout}
-            style={styles.logoutBtn}
-            accessibilityLabel="Sign out"
-            testID="logout-button"
+            onPress={() => navigation.navigate('Settings')}
+            style={styles.settingsBtn}
+            accessibilityLabel="Settings"
+            testID="settings-button"
           >
-            <Text style={styles.logoutText}>Sign Out</Text>
+            <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={Colors.textPrimary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <Path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+              <Path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+            </Svg>
           </TouchableOpacity>
         </View>
       </View>
@@ -298,18 +304,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  logoutBtn: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
+  settingsBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: BorderRadius.full,
     backgroundColor: Colors.glassLight,
-    borderRadius: BorderRadius.md,
     borderWidth: 1,
     borderColor: Colors.glassBorder,
-  },
-  logoutText: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   scroll: {
     flex: 1,

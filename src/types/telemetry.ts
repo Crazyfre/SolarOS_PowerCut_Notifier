@@ -45,6 +45,17 @@ export interface OutageRecord {
 
 export type GridStatus = 'on' | 'off' | 'unknown';
 
+export interface AppSettings {
+  alarmDurationSeconds: number;        // 5, 10, 15, 30 seconds
+  useAlarmSound: boolean;              // true = alarm.wav, false = default system sound
+  onlyAlarmNoPopup: boolean;           // true = silences the banner (low importance), keeps sound
+  alertOnPowerCut: boolean;
+  alertOnBatteryDischarge: boolean;
+  alertOnOverSolarLoad: boolean;       // house load > solar PV output
+  alertOnBatteryPercent: boolean;      // custom battery SoC trigger
+  batteryWarningThreshold: number;     // 10% to 50%
+}
+
 export interface AppState {
   isLoggedIn: boolean;
   systemId: string | null;
@@ -54,6 +65,7 @@ export interface AppState {
   outageHistory: OutageRecord[];
   isLoading: boolean;
   error: string | null;
+  settings: AppSettings;
 }
 
 export interface NotificationPayload {

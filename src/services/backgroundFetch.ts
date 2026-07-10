@@ -3,6 +3,7 @@ import * as TaskManager from 'expo-task-manager';
 import { Store } from '../storage/secureStore';
 import { fetchTelemetry } from '../api/solar';
 import { detectAndAlert } from './stateDetector';
+import { SettingsStore } from '../storage/settingsStore';
 
 export const BACKGROUND_FETCH_TASK = 'SOLARGUARD_BACKGROUND_FETCH';
 
@@ -17,8 +18,12 @@ TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
       return BackgroundFetch.BackgroundFetchResult.NoData;
     }
 
-    const telemetry = await fetchTelemetry(systemId);
-    await detectAndAlert(telemetry);
+    const [telemetry, settings] = await Promise.all([
+      fetchTelemetry(systemId),
+      SettingsStore.loadSettings(),
+    ]);
+
+    await detectAndAlert(telemetry, settings);
 
     return BackgroundFetch.BackgroundFetchResult.NewData;
   } catch (error) {
