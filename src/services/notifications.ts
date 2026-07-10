@@ -44,14 +44,12 @@ export async function requestNotificationPermissions(): Promise<boolean> {
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#F59E0B',
-      sound: 'default',
     });
     await Notifications.setNotificationChannelAsync('solarguard_low', {
       name: 'Battery Warnings',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 200, 100, 200],
       lightColor: '#EF4444',
-      sound: 'default',
     });
   }
 
@@ -92,7 +90,7 @@ export async function sendPowerCutNotification(
       `Your home is now running on battery backup.\n` +
       `Battery: ${soc}% · Load: ${load}W`,
     data: { type: 'POWER_CUT' },
-    sound: 'default',
+    sound: true,
     color: '#EF4444',
     ...(Platform.OS === 'android' && { channelId: 'solarguard' }),
   });
@@ -114,7 +112,7 @@ export async function sendGridRestoredNotification(
     title: '✅ Grid Power Restored',
     body: `Mains power is back. Outage lasted ${durationStr}.\nBattery remaining: ${soc}%`,
     data: { type: 'GRID_RESTORED', durationMs, soc },
-    sound: 'default',
+    sound: true,
     color: '#10B981',
     ...(Platform.OS === 'android' && { channelId: 'solarguard' }),
   });
@@ -131,7 +129,7 @@ export async function sendBatteryLowNotification(
     title: '🔋 Battery Running Low',
     body: `Battery at ${soc}% — power cut ongoing. Load: ${loadW}W`,
     data: { type: 'BATTERY_LOW', soc, loadW },
-    sound: 'default',
+    sound: true,
     color: '#F59E0B',
     ...(Platform.OS === 'android' && { channelId: 'solarguard_low' }),
   });
@@ -145,7 +143,7 @@ export async function sendBatteryCriticalNotification(soc: number): Promise<void
     title: '🚨 Battery Critical',
     body: `Battery at ${soc}% — shutdown imminent if grid doesn't restore soon.`,
     data: { type: 'BATTERY_CRITICAL', soc },
-    sound: 'default',
+    sound: true,
     color: '#EF4444',
     ...(Platform.OS === 'android' && { channelId: 'solarguard' }),
   });
