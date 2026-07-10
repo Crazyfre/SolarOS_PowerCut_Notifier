@@ -120,7 +120,7 @@ export function LoginScreen() {
 
       // Step 2: Discover stations via confirmed endpoint
       setLoadingStep('Finding your station…');
-      const stations = await fetchStations();
+      const stations = await fetchStations(tokens.access_token);
 
       if (stations.length === 0) {
         setError(

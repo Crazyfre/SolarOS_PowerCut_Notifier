@@ -79,8 +79,8 @@ interface StationSearchResponse {
  *
  * If multiple stations exist, returns all — the caller shows a picker.
  */
-export async function fetchStations(): Promise<{ id: string; name: string }[]> {
-  const token = await getValidToken();
+export async function fetchStations(accessToken?: string): Promise<{ id: string; name: string }[]> {
+  const token = accessToken || await getValidToken();
   const client = createClient(token);
 
   const response = await client.post<StationSearchResponse>(
