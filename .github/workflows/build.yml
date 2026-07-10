@@ -39,16 +39,20 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
-      # ── 5. Generate Native Android Code (Prebuild) ────────────────────────
+      # ── 5. Install Android NDK ────────────────────────────────────────────
+      - name: Install exact NDK version
+        run: echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;27.1.12297006"
+
+      # ── 6. Generate Native Android Code (Prebuild) ────────────────────────
       - name: Expo Prebuild
         run: npx expo prebuild --platform android --clean
 
-      # ── 6. Build the APK using Gradle ─────────────────────────────────────
+      # ── 7. Build the APK using Gradle ─────────────────────────────────────
       - name: Build Android APK
         working-directory: android
         run: ./gradlew assembleDebug
 
-      # ── 7. Create GitHub Release and Upload APK ───────────────────────────
+      # ── 8. Create GitHub Release and Upload APK ───────────────────────────
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
