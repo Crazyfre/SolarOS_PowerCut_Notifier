@@ -164,17 +164,17 @@ export async function playAlarmSoundDirectly(
     let asset;
     switch (soundName) {
       case 'siren':
-        asset = require('../../assets/siren.wav');
+        asset = require('../../../assets/siren.wav');
         break;
       case 'digital_beep':
-        asset = require('../../assets/digital_beep.wav');
+        asset = require('../../../assets/digital_beep.wav');
         break;
       case 'chime':
-        asset = require('../../assets/chime.wav');
+        asset = require('../../../assets/chime.wav');
         break;
       case 'alarm':
       default:
-        asset = require('../../assets/alarm.wav');
+        asset = require('../../../assets/alarm.wav');
         break;
     }
 

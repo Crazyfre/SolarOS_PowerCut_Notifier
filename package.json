@@ -1,6 +1,6 @@
 {
   "name": "solarguard",
-  "version": "2.1.6",
+  "version": "2.1.7",
   "main": "index.ts",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.3",
