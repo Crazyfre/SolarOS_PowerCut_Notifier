@@ -17,7 +17,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { unregisterBackgroundFetch } from '../services/backgroundFetch';
 import { StationService, SolarStation } from '../services/stationService';
 import { DevOverridesStore } from '../storage/devOverridesStore';
-import { sendTestNotification, ALARM_SOUND_OPTIONS } from '../services/notifications';
+import { sendTestNotification, ALARM_SOUND_OPTIONS, requestNotificationPermissions } from '../services/notifications';
 
 type RootStackParamList = {
   Dashboard: undefined;
@@ -549,6 +549,7 @@ export function SettingsScreen() {
                 style={styles.testAlarmBtn}
                 onPress={async () => {
                   try {
+                    await requestNotificationPermissions();
                     const tempSettings = {
                       alarmDurationSeconds: alarmDuration,
                       useAlarmSound,
