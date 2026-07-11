@@ -85,12 +85,12 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 
 async function scheduleNotification(
   content: Notifications.NotificationContentInput
-): Promise<void> {
+): Promise<string | undefined> {
   if (isExpoGo) {
     console.info(`[SolarGuard Notification] ${content.title}: ${content.body}`);
-    return;
+    return undefined;
   }
-  await Notifications.scheduleNotificationAsync({ content, trigger: null });
+  return await Notifications.scheduleNotificationAsync({ content, trigger: null });
 }
 
 // ─── Dynamic routing helper ──────────────────────────────────────────────────
@@ -131,7 +131,7 @@ export async function sendPowerCutNotification(
   const load = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
   const routing = getNotificationRouting(true, settings);
 
-  await scheduleNotification({
+  const id = await scheduleNotification({
     title: '⚡ Power Cut Detected',
     body:
       `Your home is now running on battery backup.\n` +
@@ -141,6 +141,16 @@ export async function sendPowerCutNotification(
     color: '#EF4444',
     ...(Platform.OS === 'android' && { channelId: routing.channelId }),
   });
+
+  if (id && settings.alarmDurationSeconds > 0) {
+    setTimeout(async () => {
+      try {
+        await Notifications.dismissNotificationAsync(id);
+      } catch (err) {
+        console.warn('Failed to dismiss notification:', err);
+      }
+    }, settings.alarmDurationSeconds * 1000);
+  }
 }
 
 export async function sendGridRestoredNotification(
@@ -198,7 +208,7 @@ export async function sendBatteryCriticalNotification(
 ): Promise<void> {
   const routing = getNotificationRouting(true, settings);
 
-  await scheduleNotification({
+  const id = await scheduleNotification({
     title: '🚨 Battery Critical',
     body: `Battery at ${soc}% — shutdown imminent if grid doesn't restore soon.`,
     data: { type: 'BATTERY_CRITICAL', soc },
@@ -206,6 +216,16 @@ export async function sendBatteryCriticalNotification(
     color: '#EF4444',
     ...(Platform.OS === 'android' && { channelId: routing.channelId }),
   });
+
+  if (id && settings.alarmDurationSeconds > 0) {
+    setTimeout(async () => {
+      try {
+        await Notifications.dismissNotificationAsync(id);
+      } catch (err) {
+        console.warn('Failed to dismiss notification:', err);
+      }
+    }, settings.alarmDurationSeconds * 1000);
+  }
 }
 
 export async function sendSolarMilestoneNotification(
@@ -257,6 +277,31 @@ export async function sendBatteryDischargingNotification(
     color: '#F59E0B',
     ...(Platform.OS === 'android' && { channelId: routing.channelId }),
   });
+}
+
+export async function sendTestNotification(
+  settings: AppSettings = DEFAULT_SETTINGS
+): Promise<void> {
+  const routing = getNotificationRouting(true, settings);
+
+  const id = await scheduleNotification({
+    title: '🚨 Outage Alarm Test',
+    body: 'SolarGuard alarm sound test is working successfully!',
+    data: { type: 'ALARM_TEST' },
+    sound: routing.sound as any,
+    color: '#EF4444',
+    ...(Platform.OS === 'android' && { channelId: routing.channelId }),
+  });
+
+  if (id && settings.alarmDurationSeconds > 0) {
+    setTimeout(async () => {
+      try {
+        await Notifications.dismissNotificationAsync(id);
+      } catch (err) {
+        console.warn('Failed to dismiss notification:', err);
+      }
+    }, settings.alarmDurationSeconds * 1000);
+  }
 }
 
 // ─── Expo Go notice helper ────────────────────────────────────────────────────

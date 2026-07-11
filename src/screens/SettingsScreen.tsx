@@ -16,6 +16,8 @@ import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { unregisterBackgroundFetch } from '../services/backgroundFetch';
 import { StationService, SolarStation } from '../services/stationService';
+import { DevOverridesStore } from '../storage/devOverridesStore';
+import { sendTestNotification } from '../services/notifications';
 
 type RootStackParamList = {
   Dashboard: undefined;
@@ -25,8 +27,17 @@ type RootStackParamList = {
 type NavigationProp = StackNavigationProp<RootStackParamList, 'Settings'>;
 
 export function SettingsScreen() {
-  const { settings, updateSettings, logout } = useApp();
+  const { settings, updateSettings, logout, refreshTelemetry } = useApp();
   const navigation = useNavigation<NavigationProp>();
+
+  // Developer overrides state
+  const [devOverridesEnabled, setDevOverridesEnabled] = useState(false);
+  const [devGridRelayStatus, setDevGridRelayStatus] = useState<'on' | 'off'>('on');
+  const [devBatteryStatus, setDevBatteryStatus] = useState<string>('CHARGE');
+  const [devBatterySoc, setDevBatterySoc] = useState('100');
+  const [devBatteryPower, setDevBatteryPower] = useState('0');
+  const [devPvPower, setDevPvPower] = useState('0');
+  const [devUsePower, setDevUsePower] = useState('0');
 
   const [useAlarmSound, setUseAlarmSound] = useState(settings.useAlarmSound);
   const [alarmDuration, setAlarmDuration] = useState(settings.alarmDurationSeconds);
@@ -70,6 +81,20 @@ export function SettingsScreen() {
         console.warn('Failed to load stations:', err);
       } finally {
         setIsLoadingStations(false);
+      }
+
+      // Load developer overrides
+      try {
+        const overrides = await DevOverridesStore.getOverrides();
+        setDevOverridesEnabled(overrides.enabled);
+        setDevGridRelayStatus(overrides.gridRelayStatus ?? 'on');
+        setDevBatteryStatus(overrides.batteryStatus ?? 'CHARGE');
+        setDevBatterySoc(String(overrides.batterySoc ?? 100));
+        setDevBatteryPower(String(overrides.batteryPower ?? 0));
+        setDevPvPower(String(overrides.pvPower ?? 0));
+        setDevUsePower(String(overrides.usePower ?? 0));
+      } catch (err) {
+        console.warn('Failed to load developer overrides:', err);
       }
     })();
   }, []);
@@ -121,6 +146,28 @@ export function SettingsScreen() {
     }
 
     await updateSettings(updated);
+
+    // Save developer overrides
+    const socVal = parseInt(devBatterySoc, 10);
+    const powerVal = parseInt(devBatteryPower, 10);
+    const pvVal = parseInt(devPvPower, 10);
+    const useVal = parseInt(devUsePower, 10);
+
+    const overrides = {
+      enabled: devOverridesEnabled,
+      gridRelayStatus: devGridRelayStatus,
+      batterySoc: isNaN(socVal) ? 100 : socVal,
+      batteryStatus: devBatteryStatus,
+      batteryPower: isNaN(powerVal) ? 0 : powerVal,
+      pvPower: isNaN(pvVal) ? 0 : pvVal,
+      usePower: isNaN(useVal) ? 0 : useVal,
+    };
+
+    await DevOverridesStore.saveOverrides(overrides);
+
+    // Trigger immediate refresh so telemetry changes are applied & alerts run
+    await refreshTelemetry().catch(() => {});
+
     Alert.alert('Success', 'Settings saved successfully!', [
       { text: 'OK', onPress: () => navigation.goBack() },
     ]);
@@ -455,6 +502,173 @@ export function SettingsScreen() {
           </View>
         </View>
 
+        {/* DEVELOPER OPTIONS CONFIG */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>🚨 Developer options</Text>
+          <View style={styles.card}>
+            {/* Force Test Alarm */}
+            <View style={styles.row}>
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowTitle}>Test Alarm System</Text>
+                <Text style={styles.rowSub}>Immediately trigger critical alarm sound test</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.testAlarmBtn}
+                onPress={async () => {
+                  try {
+                    const tempSettings = {
+                      alarmDurationSeconds: alarmDuration,
+                      useAlarmSound,
+                      onlyAlarmNoPopup,
+                      alertOnPowerCut,
+                      alertOnGridOffOnly,
+                      alertOnBatteryDischarge,
+                      alertOnOverSolarLoad,
+                      alertOnBatteryPercent,
+                      batteryWarningThreshold: parseInt(batteryWarningThreshold, 10) || 20,
+                      batteryCapacity: parseFloat(batteryCapacity) || 5.12,
+                      activeStationId,
+                      refreshIntervalMinutes: refreshInterval,
+                      quietHoursStart,
+                      quietHoursEnd,
+                      quietHoursEnabled,
+                      amoledTheme,
+                    };
+                    await sendTestNotification(tempSettings);
+                    Alert.alert('Alert Sent', `Critical test alert has been scheduled for ${alarmDuration}s.`);
+                  } catch (err) {
+                    Alert.alert('Error', 'Failed to send alert.');
+                  }
+                }}
+              >
+                <Text style={styles.testAlarmBtnText}>Test 🔔</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.separator} />
+
+            {/* Overrides Toggle */}
+            <View style={styles.row}>
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowTitle}>Mock Telemetry Overrides</Text>
+                <Text style={styles.rowSub}>Enable manually overriding grid & battery data</Text>
+              </View>
+              <Switch
+                value={devOverridesEnabled}
+                onValueChange={setDevOverridesEnabled}
+                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
+                thumbColor={devOverridesEnabled ? Colors.textInverse : Colors.textMuted}
+              />
+            </View>
+
+            {devOverridesEnabled && (
+              <View style={styles.developerSubSection}>
+                <View style={styles.separator} />
+
+                {/* Grid Status Selector */}
+                <View style={styles.column}>
+                  <Text style={styles.rowTitle}>Grid Status</Text>
+                  <View style={styles.durationSelector}>
+                    {(['on', 'off'] as const).map((status) => (
+                      <TouchableOpacity
+                        key={status}
+                        style={[
+                          styles.durationButton,
+                          devGridRelayStatus === status && styles.durationButtonActive,
+                        ]}
+                        onPress={() => setDevGridRelayStatus(status)}
+                      >
+                        <Text
+                          style={[
+                            styles.durationText,
+                            devGridRelayStatus === status && styles.durationTextActive,
+                          ]}
+                        >
+                          {status === 'on' ? '🔌 Grid On' : '🚫 Grid Off'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                <View style={styles.separator} />
+
+                {/* Battery Status Selector */}
+                <View style={styles.column}>
+                  <Text style={styles.rowTitle}>Battery Status</Text>
+                  <View style={styles.durationSelector}>
+                    {['CHARGE', 'DISCHARGE', 'IDLE'].map((status) => (
+                      <TouchableOpacity
+                        key={status}
+                        style={[
+                          styles.durationButton,
+                          devBatteryStatus === status && styles.durationButtonActive,
+                        ]}
+                        onPress={() => setDevBatteryStatus(status)}
+                      >
+                        <Text
+                          style={[
+                            styles.durationText,
+                            devBatteryStatus === status && styles.durationTextActive,
+                          ]}
+                        >
+                          {status === 'CHARGE' ? '⚡ Charging' : status === 'DISCHARGE' ? '🔋 Discharging' : '⏸️ Idle'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                <View style={styles.separator} />
+
+                {/* Grid inputs */}
+                <View style={styles.developerInputGrid}>
+                  <View style={styles.devInputCol}>
+                    <Text style={styles.inputLabel}>Battery SoC (%)</Text>
+                    <TextInput
+                      style={styles.devTextInput}
+                      value={devBatterySoc}
+                      onChangeText={setDevBatterySoc}
+                      keyboardType="numeric"
+                      maxLength={3}
+                    />
+                  </View>
+                  <View style={styles.devInputCol}>
+                    <Text style={styles.inputLabel}>Battery Power (W)</Text>
+                    <TextInput
+                      style={styles.devTextInput}
+                      value={devBatteryPower}
+                      onChangeText={setDevBatteryPower}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.developerInputGrid}>
+                  <View style={styles.devInputCol}>
+                    <Text style={styles.inputLabel}>Solar PV (W)</Text>
+                    <TextInput
+                      style={styles.devTextInput}
+                      value={devPvPower}
+                      onChangeText={setDevPvPower}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                  <View style={styles.devInputCol}>
+                    <Text style={styles.inputLabel}>House Load (W)</Text>
+                    <TextInput
+                      style={styles.devTextInput}
+                      value={devUsePower}
+                      onChangeText={setDevUsePower}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
+              </View>
+            )}
+          </View>
+        </View>
+
         {/* SAVE BUTTON */}
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
           <Text style={styles.saveBtnText}>Save Preferences 💾</Text>
@@ -708,6 +922,51 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   timeTextInput: {
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    fontFamily: Typography.fontFamily.bold,
+    fontSize: Typography.fontSize.base,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  testAlarmBtn: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    backgroundColor: Colors.dangerGlow,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.danger + '44',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  testAlarmBtnText: {
+    fontFamily: Typography.fontFamily.bold,
+    fontSize: Typography.fontSize.sm,
+    color: Colors.dangerLight,
+  },
+  developerSubSection: {
+    marginTop: Spacing.md,
+  },
+  developerInputGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: Spacing.md,
+    marginTop: Spacing.md,
+  },
+  devInputCol: {
+    flex: 1,
+  },
+  inputLabel: {
+    fontFamily: Typography.fontFamily.medium,
+    fontSize: Typography.fontSize.xs,
+    color: Colors.textSecondary,
+    marginBottom: Spacing.xs,
+  },
+  devTextInput: {
     backgroundColor: Colors.surfaceElevated,
     borderRadius: BorderRadius.md,
     borderWidth: 1,

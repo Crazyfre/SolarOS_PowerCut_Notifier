@@ -10,6 +10,7 @@ import {
   sendBatteryDischargingNotification,
 } from './notifications';
 import { DEFAULT_SETTINGS } from '../storage/settingsStore';
+import { DevOverridesStore } from '../storage/devOverridesStore';
 
 const OUTAGE_HISTORY_KEY = 'sg_outage_history';
 const LAST_BATTERY_STATUS_KEY = 'sg_last_battery_status';
@@ -51,6 +52,9 @@ export async function detectAndAlert(
 ): Promise<void> {
   const currentStatus = telemetry.gridRelayStatus; // 'on' | 'off'
   const lastStatus = await Store.getLastGridStatus();
+  
+  const overrides = await DevOverridesStore.getOverrides();
+  const isMocking = overrides.enabled;
 
   // ─── Grid status transition ────────────────────────────────────────────────
 
@@ -70,16 +74,18 @@ export async function detectAndAlert(
     lowNotificationSentForCurrentOutage = false;
     criticalNotificationSentForCurrentOutage = false;
 
-    // Record outage start in history
-    const history = await loadOutageHistory();
-    const outage: OutageRecord = {
-      id: `outage_${now}`,
-      startTime: now,
-      maxLoadW: telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0),
-      minBatterySoc: telemetry.batterySoc,
-    };
-    history.push(outage);
-    await saveOutageHistory(history);
+    if (!isMocking) {
+      // Record outage start in history
+      const history = await loadOutageHistory();
+      const outage: OutageRecord = {
+        id: `outage_${now}`,
+        startTime: now,
+        maxLoadW: telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0),
+        minBatterySoc: telemetry.batterySoc,
+      };
+      history.push(outage);
+      await saveOutageHistory(history);
+    }
 
     if (settings.alertOnPowerCut || settings.alertOnGridOffOnly) {
       await sendPowerCutNotification(telemetry, settings);
@@ -93,16 +99,18 @@ export async function detectAndAlert(
     await Store.setLastGridStatus('on');
     await Store.removeOutageStartTime();
 
-    // Update outage record with end time
-    const history = await loadOutageHistory();
-    const last = history[history.length - 1];
     let socDrop = 0;
-    if (last && !last.endTime) {
-      last.endTime = now;
-      last.durationMs = durationMs;
-      const startingSoc = last.minBatterySoc ?? 100;
-      socDrop = Math.max(0, startingSoc - (telemetry.batterySoc ?? 100));
-      await saveOutageHistory(history);
+    if (!isMocking) {
+      // Update outage record with end time
+      const history = await loadOutageHistory();
+      const last = history[history.length - 1];
+      if (last && !last.endTime) {
+        last.endTime = now;
+        last.durationMs = durationMs;
+        const startingSoc = last.minBatterySoc ?? 100;
+        socDrop = Math.max(0, startingSoc - (telemetry.batterySoc ?? 100));
+        await saveOutageHistory(history);
+      }
     }
 
     if (settings.alertOnPowerCut && !settings.alertOnGridOffOnly) {
@@ -131,18 +139,20 @@ export async function detectAndAlert(
       }
     }
 
-    // Update running stats in history
-    const history = await loadOutageHistory();
-    const last = history[history.length - 1];
-    if (last && !last.endTime) {
-      if (last.minBatterySoc === undefined || soc < last.minBatterySoc) {
-        last.minBatterySoc = soc;
+    if (!isMocking) {
+      // Update running stats in history
+      const history = await loadOutageHistory();
+      const last = history[history.length - 1];
+      if (last && !last.endTime) {
+        if (last.minBatterySoc === undefined || soc < last.minBatterySoc) {
+          last.minBatterySoc = soc;
+        }
+        const currentLoad = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
+        if (last.maxLoadW === undefined || currentLoad > last.maxLoadW) {
+          last.maxLoadW = currentLoad;
+        }
+        await saveOutageHistory(history);
       }
-      const currentLoad = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
-      if (last.maxLoadW === undefined || currentLoad > last.maxLoadW) {
-        last.maxLoadW = currentLoad;
-      }
-      await saveOutageHistory(history);
     }
   }
 

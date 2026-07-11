@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from 'axios';
 import { TelemetryData } from '../types/telemetry';
 import { Store } from '../storage/secureStore';
 import { refreshAccessToken } from './auth';
+import { DevOverridesStore } from '../storage/devOverridesStore';
 
 // ─── Base URL — configurable, defaults to EU region ───────────────────────────
 export const DEFAULT_API_BASE_URL = 'https://eu1.solaros.com';
@@ -121,18 +122,29 @@ export async function fetchTelemetry(systemId: string): Promise<TelemetryData> {
   let token = await getValidToken();
   let client = createClient(token);
 
-  const mapTelemetry = (data: any): TelemetryData => {
-    return {
+  const mapTelemetry = async (data: any): Promise<TelemetryData> => {
+    const overrides = await DevOverridesStore.getOverrides();
+    const mapped: TelemetryData = {
       ...data,
       pvPower: data.pvPower ?? data.generationPower,
+      batteryPower: data.batteryPower ?? 0, // default if not set
     };
+    if (overrides.enabled) {
+      if (overrides.gridRelayStatus !== undefined) mapped.gridRelayStatus = overrides.gridRelayStatus;
+      if (overrides.batterySoc !== undefined) mapped.batterySoc = overrides.batterySoc;
+      if (overrides.batteryStatus !== undefined) mapped.batteryStatus = overrides.batteryStatus;
+      if (overrides.batteryPower !== undefined) mapped.batteryPower = overrides.batteryPower;
+      if (overrides.pvPower !== undefined) mapped.pvPower = overrides.pvPower;
+      if (overrides.usePower !== undefined) mapped.usePower = overrides.usePower;
+    }
+    return mapped;
   };
 
   try {
     const response = await client.get<TelemetryData>(
       `/maintain-s/operating/system/${systemId}`
     );
-    return mapTelemetry(response.data);
+    return await mapTelemetry(response.data);
   } catch (error: unknown) {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
       // Force refresh and retry once
@@ -147,7 +159,7 @@ export async function fetchTelemetry(systemId: string): Promise<TelemetryData> {
         const retryResponse = await client.get<TelemetryData>(
           `/maintain-s/operating/system/${systemId}`
         );
-        return mapTelemetry(retryResponse.data);
+        return await mapTelemetry(retryResponse.data);
       }
       throw new Error('AUTH_REQUIRED');
     }
