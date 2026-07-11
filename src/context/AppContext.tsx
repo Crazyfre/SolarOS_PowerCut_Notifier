@@ -14,7 +14,7 @@ import { detectAndAlert, loadOutageHistory } from '../services/stateDetector';
 import { TelemetryData, OutageRecord, AuthTokens, AppSettings } from '../types/telemetry';
 import { SettingsStore, DEFAULT_SETTINGS } from '../storage/settingsStore';
 import { checkForUpdates, UpdateInfo } from '../services/updateChecker';
-import { requestNotificationPermissions } from '../services/notifications';
+import { registerNotificationChannels } from '../services/notifications';
 
 // ─── Context types ────────────────────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
         }
 
         // Register/update notification channels on startup
-        requestNotificationPermissions().catch((err) => {
+        registerNotificationChannels().catch((err) => {
           console.warn('[AppContext] Failed to register notification channels:', err);
         });
         

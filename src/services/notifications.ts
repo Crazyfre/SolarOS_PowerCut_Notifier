@@ -30,14 +30,8 @@ if (!isExpoGo) {
 
 // ─── Permission & Channel Setup ───────────────────────────────────────────────
 
-export async function requestNotificationPermissions(): Promise<boolean> {
-  if (isExpoGo) {
-    console.info(
-      '[SolarGuard] Notifications are not available in Expo Go (SDK 53+). ' +
-      'Use a development build for full notification support.'
-    );
-    return false;
-  }
+export async function registerNotificationChannels(): Promise<void> {
+  if (isExpoGo) return;
 
   if (Platform.OS === 'android') {
     // 1. Standard Alerts (High importance, system sound)
@@ -102,6 +96,18 @@ export async function requestNotificationPermissions(): Promise<boolean> {
       });
     }
   }
+}
+
+export async function requestNotificationPermissions(): Promise<boolean> {
+  await registerNotificationChannels();
+
+  if (isExpoGo) {
+    console.info(
+      '[SolarGuard] Notifications are not available in Expo Go (SDK 53+). ' +
+      'Use a development build for full notification support.'
+    );
+    return false;
+  }
 
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
   if (existingStatus === 'granted') return true;
@@ -164,17 +170,17 @@ export async function playAlarmSoundDirectly(
     let asset;
     switch (soundName) {
       case 'siren':
-        asset = require('../../../assets/siren.wav');
+        asset = require('../../assets/siren.wav');
         break;
       case 'digital_beep':
-        asset = require('../../../assets/digital_beep.wav');
+        asset = require('../../assets/digital_beep.wav');
         break;
       case 'chime':
-        asset = require('../../../assets/chime.wav');
+        asset = require('../../assets/chime.wav');
         break;
       case 'alarm':
       default:
-        asset = require('../../../assets/alarm.wav');
+        asset = require('../../assets/alarm.wav');
         break;
     }
 
