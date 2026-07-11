@@ -22,6 +22,7 @@ import { sendTestNotification, ALARM_SOUND_OPTIONS } from '../services/notificat
 type RootStackParamList = {
   Dashboard: undefined;
   Settings: undefined;
+  About: undefined;
 };
 
 type NavigationProp = StackNavigationProp<RootStackParamList, 'Settings'>;
@@ -707,10 +708,25 @@ export function SettingsScreen() {
           <Text style={styles.saveBtnText}>Save Preferences 💾</Text>
         </TouchableOpacity>
 
+        {/* ABOUT ROW */}
+        <TouchableOpacity
+          style={styles.aboutRowBtn}
+          onPress={() => navigation.navigate('About')}
+        >
+          <View style={styles.aboutRowContent}>
+            <Text style={styles.aboutRowText}>About SolarGuard</Text>
+            <Text style={styles.aboutRowArrow}>→</Text>
+          </View>
+        </TouchableOpacity>
+
         {/* LOGOUT */}
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
           <Text style={styles.logoutBtnText}>Sign Out of SolarOS</Text>
         </TouchableOpacity>
+
+        <Text style={styles.footerDisclaimer}>
+          SolarGuard is an independent companion app and is not affiliated with or endorsed by SolarOS.
+        </Text>
 
       </ScrollView>
     </SafeAreaView>
@@ -1039,5 +1055,39 @@ const styles = StyleSheet.create({
   soundTextActive: {
     color: Colors.amberLight,
     fontFamily: Typography.fontFamily.bold,
+  },
+  aboutRowBtn: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.xl,
+    marginTop: Spacing.xl,
+    marginBottom: Spacing.sm,
+    ...Shadows.card,
+  },
+  aboutRowContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  aboutRowText: {
+    fontFamily: Typography.fontFamily.bold,
+    fontSize: Typography.fontSize.base,
+    color: Colors.textPrimary,
+  },
+  aboutRowArrow: {
+    fontSize: Typography.fontSize.base,
+    color: Colors.textMuted,
+  },
+  footerDisclaimer: {
+    fontFamily: Typography.fontFamily.regular,
+    fontSize: Typography.fontSize.xs,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginTop: Spacing.xl,
+    marginBottom: Spacing.md,
+    lineHeight: 16,
   },
 });

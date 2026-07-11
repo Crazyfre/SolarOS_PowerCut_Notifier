@@ -11,6 +11,7 @@ import { DashboardScreen } from './src/screens/DashboardScreen';
 import { HistoryScreen } from './src/screens/HistoryScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { AnalyticsScreen } from './src/screens/AnalyticsScreen';
+import { AboutScreen } from './src/screens/AboutScreen';
 import { Colors, Typography, Spacing } from './src/theme';
 
 // Import background task definition so it registers at module load
@@ -113,6 +114,7 @@ function AppNavigator() {
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="MainTabs" component={MainTabs} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="About" component={AboutScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
