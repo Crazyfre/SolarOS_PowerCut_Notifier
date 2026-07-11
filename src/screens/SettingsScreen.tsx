@@ -8,7 +8,10 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
+  Platform,
+  Linking,
 } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../theme';
 import { useApp } from '../context/AppContext';
@@ -30,6 +33,9 @@ type NavigationProp = StackNavigationProp<RootStackParamList, 'Settings'>;
 export function SettingsScreen() {
   const { settings, updateSettings, logout, refreshTelemetry } = useApp();
   const navigation = useNavigation<NavigationProp>();
+
+  // Permissions State
+  const [hasNotificationPermission, setHasNotificationPermission] = useState<boolean | null>(null);
 
   // Developer overrides state
   const [devOverridesEnabled, setDevOverridesEnabled] = useState(false);
@@ -97,6 +103,14 @@ export function SettingsScreen() {
         setDevUsePower(String(overrides.usePower ?? 0));
       } catch (err) {
         console.warn('Failed to load developer overrides:', err);
+      }
+
+      // Check notification permissions
+      try {
+        const { status } = await Notifications.getPermissionsAsync();
+        setHasNotificationPermission(status === 'granted');
+      } catch (err) {
+        console.warn('Failed to check notification permissions:', err);
       }
     })();
   }, []);
@@ -387,6 +401,86 @@ export function SettingsScreen() {
                 />
               </View>
             )}
+          </View>
+        </View>
+
+        {/* SYSTEM PERMISSIONS & BACKGROUND */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>System Permissions & Background</Text>
+          <View style={styles.card}>
+            {/* Notification Permissions */}
+            <View style={styles.row}>
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowTitle}>Notification & Alarm Sound</Text>
+                <Text style={styles.rowSub}>
+                  {hasNotificationPermission === true
+                    ? 'Permissions are granted'
+                    : 'Required to play sirens and alert banners'}
+                </Text>
+              </View>
+              {hasNotificationPermission === true ? (
+                <View style={styles.grantedBadge}>
+                  <Text style={styles.grantedBadgeText}>✓ Granted</Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.permissionBtn}
+                  onPress={async () => {
+                    const granted = await requestNotificationPermissions();
+                    setHasNotificationPermission(granted);
+                    if (granted) {
+                      Alert.alert(
+                        'Success',
+                        'Notification and alarm permissions have been granted successfully!'
+                      );
+                    } else {
+                      Alert.alert(
+                        'Permission Denied',
+                        'Failed to request permission. Please enable notifications in your phone Settings.'
+                      );
+                    }
+                  }}
+                >
+                  <Text style={styles.permissionBtnText}>Enable</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.separator} />
+
+            {/* Battery Optimization Bypass */}
+            <View style={styles.row}>
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowTitle}>Background Battery Optimization</Text>
+                <Text style={styles.rowSub}>Prevent Android from killing SolarGuard background monitoring</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.configureBtn}
+                onPress={() => {
+                  Alert.alert(
+                    'Background Performance',
+                    'To ensure the app can run forever in the background and trigger sirens instantly, you must configure your device battery settings to "Unrestricted" or "Not Optimized" for SolarGuard.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Configure ⚙️',
+                        onPress: () => {
+                          if (Platform.OS === 'android') {
+                            Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS').catch(() => {
+                              Linking.openSettings().catch(() => {});
+                            });
+                          } else {
+                            Linking.openSettings().catch(() => {});
+                          }
+                        }
+                      }
+                    ]
+                  );
+                }}
+              >
+                <Text style={styles.configureBtnText}>Configure</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -1090,5 +1184,44 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xl,
     marginBottom: Spacing.md,
     lineHeight: 16,
+  },
+  grantedBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    backgroundColor: Colors.successGlow,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    borderColor: Colors.success,
+  },
+  grantedBadgeText: {
+    fontFamily: Typography.fontFamily.bold,
+    fontSize: Typography.fontSize.xs,
+    color: Colors.successLight,
+  },
+  permissionBtn: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    backgroundColor: Colors.amberGlow,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.amber + '44',
+  },
+  permissionBtnText: {
+    fontFamily: Typography.fontFamily.bold,
+    fontSize: Typography.fontSize.xs,
+    color: Colors.amberLight,
+  },
+  configureBtn: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    backgroundColor: Colors.glassLight,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+  },
+  configureBtnText: {
+    fontFamily: Typography.fontFamily.bold,
+    fontSize: Typography.fontSize.xs,
+    color: Colors.textPrimary,
   },
 });
