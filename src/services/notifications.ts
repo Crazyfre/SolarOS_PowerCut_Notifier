@@ -146,7 +146,7 @@ function getNotificationRouting(
     const option = ALARM_SOUND_OPTIONS.find(o => o.id === soundId) ?? ALARM_SOUND_OPTIONS[0];
     return {
       channelId: noPopup ? `sg_silent_alarm_${soundId}` : `sg_alarm_${soundId}`,
-      sound: Platform.OS === 'ios' ? option.file : option.id,
+      sound: Platform.OS === 'ios' ? option.file : true,
     };
   }
 
