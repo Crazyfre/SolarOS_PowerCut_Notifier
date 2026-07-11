@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { useApp } from '../context/AppContext';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { unregisterBackgroundFetch } from '../services/backgroundFetch';
+import { StationService, SolarStation } from '../services/stationService';
 
 type RootStackParamList = {
   Dashboard: undefined;
@@ -40,6 +41,40 @@ export function SettingsScreen() {
     String(settings.batteryWarningThreshold)
   );
 
+  // V2 State variables
+  const [batteryCapacity, setBatteryCapacity] = useState(String(settings.batteryCapacity ?? 5.12));
+  const [refreshInterval, setRefreshInterval] = useState(settings.refreshIntervalMinutes ?? 5);
+  const [preferredUnit, setPreferredUnit] = useState<'W' | 'kW'>(settings.preferredUnit ?? 'W');
+  const [amoledTheme, setAmoledTheme] = useState(settings.amoledTheme ?? false);
+  const [quietHoursEnabled, setQuietHoursEnabled] = useState(settings.quietHoursEnabled ?? false);
+  const [quietHoursStart, setQuietHoursStart] = useState(settings.quietHoursStart ?? '23:00');
+  const [quietHoursEnd, setQuietHoursEnd] = useState(settings.quietHoursEnd ?? '07:00');
+
+  // Stations List state
+  const [stations, setStations] = useState<SolarStation[]>([]);
+  const [activeStationId, setActiveStationId] = useState<string | null>(settings.activeStationId ?? null);
+  const [isLoadingStations, setIsLoadingStations] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setIsLoadingStations(true);
+      try {
+        const list = await StationService.getStations();
+        setStations(list);
+        
+        // If there is no active station select the first one
+        if (!activeStationId && list.length > 0) {
+          setActiveStationId(list[0].id);
+        }
+      } catch (err) {
+        console.warn('Failed to load stations:', err);
+      } finally {
+        setIsLoadingStations(false);
+      }
+    })();
+  }, []);
+
+
   // ─── Save settings ─────────────────────────────────────────────────────────
 
   const handleSave = async () => {
@@ -53,6 +88,12 @@ export function SettingsScreen() {
       return;
     }
 
+    const capacityNum = parseFloat(batteryCapacity);
+    if (isNaN(capacityNum) || capacityNum <= 0) {
+      Alert.alert('Invalid Input', 'Battery capacity must be a positive number.');
+      return;
+    }
+
     const updated = {
       alarmDurationSeconds: alarmDuration,
       useAlarmSound,
@@ -62,7 +103,22 @@ export function SettingsScreen() {
       alertOnOverSolarLoad,
       alertOnBatteryPercent,
       batteryWarningThreshold: thresholdNum,
+      batteryCapacity: capacityNum,
+      activeStationId,
+      refreshIntervalMinutes: refreshInterval,
+      quietHoursStart,
+      quietHoursEnd,
+      quietHoursEnabled,
+      preferredUnit,
+      amoledTheme,
     };
+
+    if (activeStationId) {
+      const selectedStation = stations.find(s => s.id === activeStationId);
+      if (selectedStation) {
+        await StationService.setActiveStation(selectedStation);
+      }
+    }
 
     await updateSettings(updated);
     Alert.alert('Success', 'Settings saved successfully!', [
@@ -87,7 +143,7 @@ export function SettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={[styles.root, amoledTheme && { backgroundColor: '#000000' }]} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         
         {/* Header */}
@@ -234,6 +290,180 @@ export function SettingsScreen() {
                   keyboardType="numeric"
                   maxLength={2}
                 />
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* SMART COMPANION CONFIG */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>Smart Companion Config</Text>
+          <View style={styles.card}>
+            {/* Station switcher */}
+            {stations.length > 0 && (
+              <View style={styles.column}>
+                <Text style={styles.rowTitle}>Select Active Station</Text>
+                <Text style={styles.rowSub}>Choose which solar plant to monitor</Text>
+                <View style={styles.stationSelector}>
+                  {stations.map((st) => (
+                    <TouchableOpacity
+                      key={st.id}
+                      style={[
+                        styles.stationButton,
+                        activeStationId === st.id && styles.stationButtonActive,
+                      ]}
+                      onPress={() => setActiveStationId(st.id)}
+                    >
+                      <Text
+                        style={[
+                          styles.stationText,
+                          activeStationId === st.id && styles.stationTextActive,
+                        ]}
+                      >
+                        {st.name.includes('Home') ? '🏠 ' : st.name.includes('Office') ? '🏢 ' : '⚡ '}
+                        {st.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={styles.separator} />
+              </View>
+            )}
+
+            {/* Battery Capacity */}
+            <View style={styles.row}>
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowTitle}>Battery Capacity</Text>
+                <Text style={styles.rowSub}>Enter total battery storage size in kWh</Text>
+              </View>
+              <View style={styles.capacityInputContainer}>
+                <TextInput
+                  style={styles.capacityInput}
+                  value={batteryCapacity}
+                  onChangeText={setBatteryCapacity}
+                  keyboardType="numeric"
+                  placeholder="5.12"
+                />
+                <Text style={styles.capacityUnit}>kWh</Text>
+              </View>
+            </View>
+
+            <View style={styles.separator} />
+
+            {/* Preferred Units */}
+            <View style={styles.column}>
+              <Text style={styles.rowTitle}>Preferred Power Units</Text>
+              <Text style={styles.rowSub}>Format power numbers in Watts or Kilowatts</Text>
+              <View style={styles.durationSelector}>
+                {(['W', 'kW'] as const).map((unit) => (
+                  <TouchableOpacity
+                    key={unit}
+                    style={[
+                      styles.durationButton,
+                      preferredUnit === unit && styles.durationButtonActive,
+                    ]}
+                    onPress={() => setPreferredUnit(unit)}
+                  >
+                    <Text
+                      style={[
+                        styles.durationText,
+                        preferredUnit === unit && styles.durationTextActive,
+                      ]}
+                    >
+                      {unit === 'W' ? 'Watts (W)' : 'Kilowatts (kW)'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.separator} />
+
+            {/* Refresh Interval */}
+            <View style={styles.column}>
+              <Text style={styles.rowTitle}>Refresh Interval</Text>
+              <Text style={styles.rowSub}>Select live background/foreground refresh speed</Text>
+              <View style={styles.durationSelector}>
+                {[1, 5, 15, 30].map((mins) => (
+                  <TouchableOpacity
+                    key={mins}
+                    style={[
+                      styles.durationButton,
+                      refreshInterval === mins && styles.durationButtonActive,
+                    ]}
+                    onPress={() => setRefreshInterval(mins)}
+                  >
+                    <Text
+                      style={[
+                        styles.durationText,
+                        refreshInterval === mins && styles.durationTextActive,
+                      ]}
+                    >
+                      {mins}m
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* DISPLAY & PREFERENCES */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>Display & Quiet Hours</Text>
+          <View style={styles.card}>
+            {/* AMOLED Theme Switch */}
+            <View style={styles.row}>
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowTitle}>AMOLED Dark Theme</Text>
+                <Text style={styles.rowSub}>Use pure black background for OLED screens</Text>
+              </View>
+              <Switch
+                value={amoledTheme}
+                onValueChange={setAmoledTheme}
+                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
+                thumbColor={amoledTheme ? Colors.textInverse : Colors.textMuted}
+              />
+            </View>
+
+            <View style={styles.separator} />
+
+            {/* Quiet Hours Switch */}
+            <View style={styles.row}>
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowTitle}>Enable Quiet Hours</Text>
+                <Text style={styles.rowSub}>Mute alert sound during specified hours</Text>
+              </View>
+              <Switch
+                value={quietHoursEnabled}
+                onValueChange={setQuietHoursEnabled}
+                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
+                thumbColor={quietHoursEnabled ? Colors.textInverse : Colors.textMuted}
+              />
+            </View>
+
+            {quietHoursEnabled && (
+              <View style={styles.quietHoursInputRow}>
+                <View style={styles.timeInputBlock}>
+                  <Text style={styles.timeInputLabel}>Start Time</Text>
+                  <TextInput
+                    style={styles.timeTextInput}
+                    value={quietHoursStart}
+                    onChangeText={setQuietHoursStart}
+                    placeholder="23:00"
+                    maxLength={5}
+                  />
+                </View>
+                <View style={styles.timeInputBlock}>
+                  <Text style={styles.timeInputLabel}>End Time</Text>
+                  <TextInput
+                    style={styles.timeTextInput}
+                    value={quietHoursEnd}
+                    onChangeText={setQuietHoursEnd}
+                    placeholder="07:00"
+                    maxLength={5}
+                  />
+                </View>
               </View>
             )}
           </View>
@@ -420,5 +650,87 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily.bold,
     fontSize: Typography.fontSize.base,
     color: Colors.dangerLight,
+  },
+  stationSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
+  stationButton: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    backgroundColor: Colors.glassLight,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    borderRadius: BorderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stationButtonActive: {
+    backgroundColor: Colors.amber,
+    borderColor: Colors.amber,
+  },
+  stationText: {
+    fontFamily: Typography.fontFamily.medium,
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textSecondary,
+  },
+  stationTextActive: {
+    color: Colors.textInverse,
+    fontFamily: Typography.fontFamily.bold,
+  },
+  capacityInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    paddingHorizontal: Spacing.sm,
+  },
+  capacityInput: {
+    width: 60,
+    paddingVertical: Spacing.xs,
+    fontFamily: Typography.fontFamily.bold,
+    fontSize: Typography.fontSize.base,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  capacityUnit: {
+    fontFamily: Typography.fontFamily.medium,
+    fontSize: Typography.fontSize.xs,
+    color: Colors.textMuted,
+    marginLeft: 2,
+  },
+  quietHoursInputRow: {
+    flexDirection: 'row',
+    gap: Spacing.lg,
+    marginTop: Spacing.md,
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Colors.divider,
+  },
+  timeInputBlock: {
+    flex: 1,
+  },
+  timeInputLabel: {
+    fontFamily: Typography.fontFamily.medium,
+    fontSize: Typography.fontSize.xs,
+    color: Colors.textSecondary,
+    marginBottom: Spacing.xs,
+  },
+  timeTextInput: {
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    fontFamily: Typography.fontFamily.bold,
+    fontSize: Typography.fontSize.base,
+    color: Colors.textPrimary,
+    textAlign: 'center',
   },
 });

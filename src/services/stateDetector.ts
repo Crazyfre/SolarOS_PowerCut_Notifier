@@ -96,14 +96,17 @@ export async function detectAndAlert(
     // Update outage record with end time
     const history = await loadOutageHistory();
     const last = history[history.length - 1];
+    let socDrop = 0;
     if (last && !last.endTime) {
       last.endTime = now;
       last.durationMs = durationMs;
+      const startingSoc = last.minBatterySoc ?? 100;
+      socDrop = Math.max(0, startingSoc - (telemetry.batterySoc ?? 100));
       await saveOutageHistory(history);
     }
 
     if (settings.alertOnPowerCut) {
-      await sendGridRestoredNotification(durationMs, telemetry.batterySoc ?? 0, settings);
+      await sendGridRestoredNotification(durationMs, telemetry.batterySoc ?? 0, settings, socDrop);
     }
   }
 

@@ -10,6 +10,7 @@ import { LoginScreen } from './src/screens/LoginScreen';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { HistoryScreen } from './src/screens/HistoryScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
+import { AnalyticsScreen } from './src/screens/AnalyticsScreen';
 import { Colors, Typography, Spacing } from './src/theme';
 
 // Import background task definition so it registers at module load
@@ -54,12 +55,20 @@ function MainTabs() {
           tabBarLabel: 'History',
         }}
       />
+      <Tab.Screen
+        name="Analytics"
+        component={AnalyticsScreen}
+        options={{
+          tabBarIcon: ({ focused }) => <TabIcon icon="📊" focused={focused} />,
+          tabBarLabel: 'Analytics',
+        }}
+      />
     </Tab.Navigator>
   );
 }
 
 function AppNavigator() {
-  const { isLoggedIn, isAuthLoading } = useApp();
+  const { isLoggedIn, isAuthLoading, settings } = useApp();
 
   if (isAuthLoading) {
     return (
@@ -79,14 +88,16 @@ function AppNavigator() {
     return <LoginScreen />;
   }
 
+  const isAmoled = settings?.amoledTheme ?? false;
+
   return (
     <NavigationContainer
       theme={{
         dark: true,
         colors: {
           primary: Colors.amber,
-          background: Colors.background,
-          card: Colors.surface,
+          background: isAmoled ? '#000000' : Colors.background,
+          card: isAmoled ? '#000000' : Colors.surface,
           text: Colors.textPrimary,
           border: Colors.divider,
           notification: Colors.danger,

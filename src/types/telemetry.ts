@@ -54,6 +54,16 @@ export interface AppSettings {
   alertOnOverSolarLoad: boolean;       // house load > solar PV output
   alertOnBatteryPercent: boolean;      // custom battery SoC trigger
   batteryWarningThreshold: number;     // 10% to 50%
+  
+  // V2 additions
+  batteryCapacity: number;             // in kWh, e.g. 5.12
+  activeStationId: string | null;      // Selected station ID
+  refreshIntervalMinutes: number;      // 5, 10, 15 etc.
+  quietHoursStart: string;             // HH:MM format
+  quietHoursEnd: string;               // HH:MM format
+  quietHoursEnabled: boolean;
+  preferredUnit: 'kW' | 'W';
+  amoledTheme: boolean;
 }
 
 export interface AppState {

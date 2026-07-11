@@ -30,9 +30,10 @@ function formatTime(ts: number | null): string {
 }
 
 export function DashboardScreen() {
-  const { telemetry, isFetching, fetchError, refreshTelemetry, lastFetchTime, updateInfo } = useApp();
+  const { telemetry, isFetching, fetchError, refreshTelemetry, lastFetchTime, updateInfo, settings } = useApp();
   const navigation = useNavigation<any>();
   const [outageStart, setOutageStart] = useState<number | null>(null);
+  const [timeAgoStr, setTimeAgoStr] = useState('just now');
 
   // Load persisted outage start time
   React.useEffect(() => {
@@ -45,12 +46,81 @@ export function DashboardScreen() {
     setOutageStart(ts);
   }, [refreshTelemetry]);
 
+  // Keep track of time ago display
+  React.useEffect(() => {
+    const updateText = () => {
+      if (lastFetchTime) {
+        const diffSecs = Math.floor((Date.now() - lastFetchTime) / 1000);
+        if (diffSecs < 10) setTimeAgoStr('just now');
+        else if (diffSecs < 60) setTimeAgoStr(`${diffSecs}s ago`);
+        else {
+          const diffMins = Math.floor(diffSecs / 60);
+          if (diffMins < 60) setTimeAgoStr(`${diffMins} min ago`);
+          else setTimeAgoStr(new Date(lastFetchTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        }
+      } else {
+        setTimeAgoStr('Connecting…');
+      }
+    };
+    
+    updateText();
+    const interval = setInterval(updateText, 10000);
+    return () => clearInterval(interval);
+  }, [lastFetchTime]);
+
   const isGridOn = telemetry?.gridRelayStatus === 'on';
   const isOutage = telemetry?.gridRelayStatus === 'off';
   const batteryIsCharging = telemetry?.batteryStatus === 'CHARGE';
+  const isAmoled = settings?.amoledTheme ?? false;
+
+  const preferredUnit = settings?.preferredUnit ?? 'W';
+  const batteryCapacity = settings?.batteryCapacity ?? 5.12;
+
+  const formatPower = (watts: number) => {
+    if (preferredUnit === 'kW') {
+      return `${(watts / 1000).toFixed(2)} kW`;
+    }
+    return `${Math.round(watts)} W`;
+  };
+
+  const getBackupTimeText = () => {
+    if (!telemetry) return '—';
+    const soc = telemetry.batterySoc ?? 0;
+    // load is usePower (house load) during outage, fallback to discharge power or 300W
+    const load = telemetry.usePower ?? telemetry.dischargePower ?? 300;
+    const capacityWh = batteryCapacity * 1000;
+    const usableEnergyWh = capacityWh * (soc / 100);
+    const actualLoad = load > 0 ? load : 100;
+    const hours = usableEnergyWh / actualLoad;
+    const totalMins = Math.round(hours * 60);
+    const h = Math.floor(totalMins / 60);
+    const m = totalMins % 60;
+    if (h > 0) return `≈ ${h}h ${m}m`;
+    return `≈ ${m}m`;
+  };
+
+  // Health indicators
+  const getBatteryHealth = () => {
+    const soc = telemetry?.batterySoc ?? 100;
+    if (soc > 50) return 'Excellent';
+    if (soc > 20) return 'Good';
+    if (soc > 10) return 'Fair';
+    return 'Critical';
+  };
+
+  const getGridHealth = () => {
+    return isGridOn ? 'Stable' : 'Offline';
+  };
+
+  const getSolarHealth = () => {
+    const pv = telemetry?.pvPower ?? 0;
+    if (pv > 1000) return 'Producing Normally';
+    if (pv > 0) return 'Low Sun';
+    return 'No Sun';
+  };
 
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
+    <SafeAreaView style={[styles.root, isAmoled && { backgroundColor: '#000000' }]} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
       {/* Header */}
@@ -58,7 +128,7 @@ export function DashboardScreen() {
         <View>
           <Text style={styles.headerTitle}>SolarGuard</Text>
           <Text style={styles.headerSub}>
-            {lastFetchTime ? `Updated ${formatTime(lastFetchTime)}` : 'Connecting…'}
+            {lastFetchTime ? `Updated ${timeAgoStr}` : 'Connecting…'}
           </Text>
         </View>
         <View style={styles.headerActions}>
@@ -139,38 +209,70 @@ export function DashboardScreen() {
 
         {telemetry ? (
           <>
-            {/* OUTAGE ALERT — shown prominently when grid is off */}
-            {isOutage && (
-              <OutageAlert telemetry={telemetry} outageStartTime={outageStart} />
-            )}
-
-            {/* Grid Status Banner (normal) */}
-            {!isOutage && (
-              <View style={[styles.gridBanner, { borderColor: Colors.success + '44' }]}>
-                <View style={styles.gridBannerGlow} />
-                <Text style={styles.gridBannerDot}>●</Text>
-                <View>
-                  <Text style={styles.gridBannerTitle}>Grid Connected</Text>
-                  <Text style={styles.gridBannerSub}>
-                    {telemetry.wirePower > 0
-                      ? `Drawing ${telemetry.wirePower}W from mains`
-                      : telemetry.wirePower < 0
-                      ? `Exporting ${Math.abs(telemetry.wirePower)}W to grid`
-                      : 'Standby — running on solar/battery'}
-                  </Text>
-                </View>
-              </View>
-            )}
+            {/* Smart Status Banner */}
+            {(() => {
+              if (!isOutage) {
+                // Green: Grid Connected
+                const isExporting = telemetry.wirePower < 0;
+                const powerStr = formatPower(Math.abs(telemetry.wirePower));
+                return (
+                  <View style={[styles.gridBanner, { borderColor: Colors.success + '44' }, isAmoled && styles.bannerAmoled]}>
+                    <View style={[styles.gridBannerGlow, { backgroundColor: Colors.successGlow }]} />
+                    <Text style={[styles.gridBannerDot, { color: Colors.success }]}>🟢</Text>
+                    <View>
+                      <Text style={styles.gridBannerTitle}>Grid Connected</Text>
+                      <Text style={styles.gridBannerSub}>
+                        {isExporting ? `Exporting ${powerStr}` : telemetry.wirePower > 0 ? `Importing ${powerStr}` : 'Standby'}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              } else {
+                const warningThreshold = settings?.batteryWarningThreshold ?? 20;
+                const isCritical = (telemetry.batterySoc ?? 100) <= warningThreshold;
+                if (isCritical) {
+                  // Red: Battery Critical
+                  return (
+                    <View style={[styles.gridBanner, { borderColor: Colors.danger + '44' }, isAmoled && styles.bannerAmoled]}>
+                      <View style={[styles.gridBannerGlow, { backgroundColor: Colors.dangerGlow }]} />
+                      <Text style={[styles.gridBannerDot, { color: Colors.danger }]}>🔴</Text>
+                      <View>
+                        <Text style={styles.gridBannerTitle}>Battery Critical</Text>
+                        <Text style={styles.gridBannerSub}>
+                          {telemetry.batterySoc}% SOC · Estimated remaining {getBackupTimeText()}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                } else {
+                  // Yellow: Running on Battery
+                  return (
+                    <View style={[styles.gridBanner, { borderColor: Colors.amber + '44' }, isAmoled && styles.bannerAmoled]}>
+                      <View style={[styles.gridBannerGlow, { backgroundColor: Colors.warningGlow }]} />
+                      <Text style={[styles.gridBannerDot, { color: Colors.amber }]}>🟡</Text>
+                      <View>
+                        <Text style={styles.gridBannerTitle}>Running on Battery</Text>
+                        <Text style={styles.gridBannerSub}>
+                          Remaining {getBackupTimeText()}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                }
+              }
+            })()}
 
             {/* Battery Section */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Battery</Text>
-              <View style={styles.batteryCard}>
+              <View style={[styles.batteryCard, isAmoled && styles.cardAmoled]}>
                 <BatteryBar
                   soc={telemetry.batterySoc ?? 0}
                   voltage={telemetry.batteryBv}
                   isCharging={batteryIsCharging}
                   large
+                  estimatedBackupText={getBackupTimeText()}
+                  amoled={isAmoled}
                 />
               </View>
             </View>
@@ -181,27 +283,29 @@ export function DashboardScreen() {
                 <View style={[styles.statCell, { flex: 1, marginRight: Spacing.sm }]}>
                   <StatusCard
                     title="Grid"
-                    value={isGridOn ? 'Available' : 'OFFLINE'}
+                    value={isGridOn ? 'Connected' : 'OFFLINE'}
                     subtitle={
                       !isGridOn
                         ? 'Power cut active'
                         : telemetry.wirePower > 0
-                        ? `${telemetry.wirePower}W import`
+                        ? `▲ Import: ${formatPower(telemetry.wirePower)}`
                         : telemetry.wirePower < 0
-                        ? `${Math.abs(telemetry.wirePower)}W export`
+                        ? `▼ Export: ${formatPower(Math.abs(telemetry.wirePower))}`
                         : '0W standby'
                     }
                     icon={isGridOn ? '🔌' : '🚫'}
                     accentColor={isGridOn ? Colors.success : Colors.danger}
+                    amoled={isAmoled}
                   />
                 </View>
                 <View style={[styles.statCell, { flex: 1, marginLeft: Spacing.sm }]}>
                   <StatusCard
                     title="House Load"
-                    value={`${telemetry.usePower ?? 0}W`}
+                    value={formatPower(telemetry.usePower ?? 0)}
                     subtitle="Current consumption"
                     icon="🏠"
                     accentColor={Colors.amber}
+                    amoled={isAmoled}
                   />
                 </View>
               </View>
@@ -209,20 +313,20 @@ export function DashboardScreen() {
               <View style={styles.statsRow}>
                 <View style={[styles.statCell, { flex: 1, marginRight: Spacing.sm }]}>
                   <StatusCard
-                    title="Battery Mode"
+                    title="Battery Status"
                     value={
                       telemetry.batteryStatus === 'CHARGE'
-                        ? 'Charging'
+                        ? '▲ Charging'
                         : telemetry.batteryStatus === 'DISCHARGE'
-                        ? 'Discharging'
+                        ? '▼ Discharging'
                         : 'Idle'
                     }
                     subtitle={
                       telemetry.batteryStatus === 'CHARGE'
-                        ? `+${telemetry.chargePower ?? 0}W`
+                        ? `+${formatPower(telemetry.chargePower ?? 0)}`
                         : telemetry.batteryStatus === 'DISCHARGE'
-                        ? `-${telemetry.dischargePower ?? 0}W`
-                        : '0W'
+                        ? `-${formatPower(telemetry.dischargePower ?? 0)}`
+                        : '0 W'
                     }
                     icon={
                       telemetry.batteryStatus === 'CHARGE'
@@ -234,15 +338,17 @@ export function DashboardScreen() {
                     accentColor={
                       batteryIsCharging ? Colors.blue : Colors.amber
                     }
+                    amoled={isAmoled}
                   />
                 </View>
                 <View style={[styles.statCell, { flex: 1, marginLeft: Spacing.sm }]}>
                   <StatusCard
                     title="Solar PV"
-                    value={`${telemetry.pvPower ?? 0}W`}
-                    subtitle="Generation"
+                    value={formatPower(telemetry.pvPower ?? 0)}
+                    subtitle="Generation today"
                     icon="☀️"
                     accentColor={Colors.amberLight}
+                    amoled={isAmoled}
                   />
                 </View>
               </View>
@@ -250,7 +356,7 @@ export function DashboardScreen() {
 
             {/* Power Flow Diagram */}
             <View style={styles.section}>
-              <View style={styles.flowCard}>
+              <View style={[styles.flowCard, isAmoled && styles.cardAmoled]}>
                 <PowerFlowDiagram
                   gridOn={isGridOn}
                   pvPower={telemetry.pvPower}
@@ -258,7 +364,35 @@ export function DashboardScreen() {
                   usePower={telemetry.usePower}
                   wirePower={telemetry.wirePower}
                   batterySoc={telemetry.batterySoc}
+                  preferredUnit={preferredUnit}
                 />
+              </View>
+            </View>
+
+            {/* Health Indicators */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>System Health</Text>
+              <View style={[styles.healthCard, isAmoled && styles.cardAmoled]}>
+                <View style={styles.healthRow}>
+                  <Text style={styles.healthLabel}>Battery</Text>
+                  <Text style={[styles.healthValue, { color: getBatteryHealth() === 'Critical' ? Colors.danger : Colors.success }]}>
+                    {getBatteryHealth()} ({telemetry.batterySoc}%)
+                  </Text>
+                </View>
+                <View style={styles.separator} />
+                <View style={styles.healthRow}>
+                  <Text style={styles.healthLabel}>Grid Connection</Text>
+                  <Text style={[styles.healthValue, { color: isGridOn ? Colors.success : Colors.danger }]}>
+                    {getGridHealth()}
+                  </Text>
+                </View>
+                <View style={styles.separator} />
+                <View style={styles.healthRow}>
+                  <Text style={styles.healthLabel}>Solar PV Production</Text>
+                  <Text style={[styles.healthValue, { color: telemetry.pvPower && telemetry.pvPower > 0 ? Colors.success : Colors.textMuted }]}>
+                    {getSolarHealth()}
+                  </Text>
+                </View>
               </View>
             </View>
 
@@ -507,5 +641,40 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily.mono,
     fontSize: Typography.fontSize.xs,
     color: Colors.textSecondary,
+  },
+  bannerAmoled: {
+    backgroundColor: '#000000',
+    borderColor: '#222',
+  },
+  cardAmoled: {
+    backgroundColor: '#000000',
+    borderColor: '#222',
+  },
+  healthCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    padding: Spacing.base,
+    ...Shadows.card,
+  },
+  healthRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.sm,
+  },
+  healthLabel: {
+    fontFamily: Typography.fontFamily.medium,
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textSecondary,
+  },
+  healthValue: {
+    fontFamily: Typography.fontFamily.bold,
+    fontSize: Typography.fontSize.sm,
+  },
+  separator: {
+    height: 1,
+    backgroundColor: Colors.divider,
+    marginVertical: Spacing.xs,
   },
 });

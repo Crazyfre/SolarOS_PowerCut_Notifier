@@ -12,6 +12,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   alertOnOverSolarLoad: false,
   alertOnBatteryPercent: true,
   batteryWarningThreshold: 20,
+  batteryCapacity: 5.12,
+  activeStationId: null,
+  refreshIntervalMinutes: 5,
+  quietHoursStart: '23:00',
+  quietHoursEnd: '07:00',
+  quietHoursEnabled: false,
+  preferredUnit: 'W',
+  amoledTheme: false,
 };
 
 export const SettingsStore = {

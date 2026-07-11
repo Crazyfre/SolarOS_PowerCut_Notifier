@@ -146,17 +146,18 @@ export async function sendPowerCutNotification(
 export async function sendGridRestoredNotification(
   durationMs: number,
   soc: number,
-  settings: AppSettings = DEFAULT_SETTINGS
+  settings: AppSettings = DEFAULT_SETTINGS,
+  socDrop: number = 0
 ): Promise<void> {
   const minutes = Math.floor(durationMs / 60000);
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
-  const durationStr = hours > 0 ? `${hours}h ${mins}m` : `${minutes} minutes`;
+  const durationStr = hours > 0 ? `${hours}h ${mins}m` : `${minutes}m`;
   const routing = getNotificationRouting(false, settings);
 
   await scheduleNotification({
-    title: '✅ Grid Power Restored',
-    body: `Mains power is back. Outage lasted ${durationStr}.\nBattery remaining: ${soc}%`,
+    title: '⚡ Grid Restored',
+    body: `Duration: ${durationStr}\nBattery used: ${socDrop}%`,
     data: { type: 'GRID_RESTORED', durationMs, soc },
     sound: routing.sound as any,
     color: '#10B981',
@@ -170,10 +171,20 @@ export async function sendBatteryLowNotification(
   settings: AppSettings = DEFAULT_SETTINGS
 ): Promise<void> {
   const routing = getNotificationRouting(false, settings);
+  const batteryCapacity = settings.batteryCapacity ?? 5.12;
+  const capacityWh = batteryCapacity * 1000;
+  const usableEnergyWh = capacityWh * (soc / 100);
+  const actualLoad = loadW > 0 ? loadW : 100;
+  const remainingHours = usableEnergyWh / actualLoad;
+  const totalMins = Math.round(remainingHours * 60);
+  
+  const remainingStr = totalMins >= 60 
+    ? `${Math.floor(totalMins / 60)}h ${totalMins % 60}m` 
+    : `${totalMins} minutes`;
 
   await scheduleNotification({
-    title: '🔋 Battery Running Low',
-    body: `Battery at ${soc}% — power cut ongoing. Load: ${loadW}W`,
+    title: '⚠️ Battery Low',
+    body: `Battery: ${soc}%\nEstimated backup: ${remainingStr}\nCurrent load: ${loadW}W`,
     data: { type: 'BATTERY_LOW', soc, loadW },
     sound: routing.sound as any,
     color: '#F59E0B',
@@ -193,6 +204,22 @@ export async function sendBatteryCriticalNotification(
     data: { type: 'BATTERY_CRITICAL', soc },
     sound: routing.sound as any,
     color: '#EF4444',
+    ...(Platform.OS === 'android' && { channelId: routing.channelId }),
+  });
+}
+
+export async function sendSolarMilestoneNotification(
+  generationKwh: number,
+  settings: AppSettings = DEFAULT_SETTINGS
+): Promise<void> {
+  const routing = getNotificationRouting(false, settings);
+
+  await scheduleNotification({
+    title: '☀️ Great Day!',
+    body: `Today's generation: ${generationKwh.toFixed(1)}kWh`,
+    data: { type: 'SOLAR_MILESTONE', generationKwh },
+    sound: routing.sound as any,
+    color: '#F59E0B',
     ...(Platform.OS === 'android' && { channelId: routing.channelId }),
   });
 }

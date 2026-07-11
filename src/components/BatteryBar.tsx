@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,14 +6,15 @@ import {
   Animated,
   Easing,
 } from 'react-native';
-import { useEffect, useRef } from 'react';
 import { Colors, BorderRadius, Typography, Spacing } from '../theme';
 
 interface BatteryBarProps {
   soc: number;          // 0–100
-  voltage?: number;     // optional battery voltage
+  voltage?: number;     // battery voltage
   isCharging?: boolean;
   large?: boolean;
+  estimatedBackupText?: string;
+  amoled?: boolean;
 }
 
 function getSocColor(soc: number): string {
@@ -22,7 +23,14 @@ function getSocColor(soc: number): string {
   return Colors.danger;
 }
 
-export function BatteryBar({ soc, voltage, isCharging, large }: BatteryBarProps) {
+export function BatteryBar({
+  soc,
+  voltage,
+  isCharging,
+  large,
+  estimatedBackupText,
+  amoled,
+}: BatteryBarProps) {
   const animatedWidth = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -60,7 +68,12 @@ export function BatteryBar({ soc, voltage, isCharging, large }: BatteryBarProps)
     }
   }, [clampedSoc]);
 
-  const barHeight = large ? 20 : 12;
+  // Build character visualization: e.g. ███████████████░ (16 blocks total)
+  const totalBlocks = 16;
+  const numFilled = Math.round((clampedSoc / 100) * totalBlocks);
+  const numEmpty = totalBlocks - numFilled;
+  const blockBarString = '█'.repeat(Math.max(0, numFilled)) + '░'.repeat(Math.max(0, numEmpty));
+
   const fontSize = large ? Typography.fontSize['3xl'] : Typography.fontSize['2xl'];
 
   return (
@@ -77,45 +90,25 @@ export function BatteryBar({ soc, voltage, isCharging, large }: BatteryBarProps)
         <View style={styles.statusRow}>
           {isCharging !== undefined && (
             <Text style={[styles.statusText, { color: isCharging ? Colors.success : Colors.amber }]}>
-              {isCharging ? '⚡ Charging' : '🔋 Discharging'}
+              {isCharging ? '▲ Charging' : '▼ Discharging'}
             </Text>
           )}
           {voltage !== undefined && (
-            <Text style={styles.voltageText}>{voltage.toFixed(1)} V</Text>
+            <Text style={styles.voltageText}>{voltage.toFixed(1)}V</Text>
           )}
         </View>
       </View>
 
-      {/* Battery shell */}
-      <View style={[styles.batteryShell, { height: barHeight + 8 }]}>
-        <View style={[styles.batteryBody, { height: barHeight }]}>
-          <Animated.View
-            style={[
-              styles.batteryFill,
-              {
-                width: animatedWidth.interpolate({
-                  inputRange: [0, 100],
-                  outputRange: ['0%', '100%'],
-                }),
-                backgroundColor: fillColor,
-                // Glow effect for critical
-                shadowColor: fillColor,
-                shadowOpacity: clampedSoc <= 20 ? 0.8 : 0.3,
-                shadowRadius: 6,
-                elevation: 3,
-              },
-            ]}
-          />
-          {/* Segment lines */}
-          {[25, 50, 75].map((mark) => (
-            <View
-              key={mark}
-              style={[styles.segmentLine, { left: `${mark}%` as unknown as number }]}
-            />
-          ))}
+      {/* Character block bar */}
+      <Text style={[styles.blockBar, { color: fillColor }]}>{blockBarString}</Text>
+
+      {/* Backup time estimation */}
+      {estimatedBackupText && (
+        <View style={styles.backupContainer}>
+          <Text style={styles.backupLabel}>Estimated Backup</Text>
+          <Text style={styles.backupValue}>{estimatedBackupText}</Text>
         </View>
-        <View style={styles.batteryTerminal} />
-      </View>
+      )}
     </View>
   );
 }
@@ -139,47 +132,38 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   statusText: {
-    fontFamily: Typography.fontFamily.medium,
+    fontFamily: Typography.fontFamily.semiBold,
     fontSize: Typography.fontSize.sm,
   },
   voltageText: {
     fontFamily: Typography.fontFamily.mono,
     fontSize: Typography.fontSize.xs,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  blockBar: {
+    fontFamily: Typography.fontFamily.mono,
+    fontSize: Typography.fontSize.lg,
+    letterSpacing: 2,
+    marginVertical: Spacing.md,
+  },
+  backupContainer: {
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.divider,
+  },
+  backupLabel: {
+    fontFamily: Typography.fontFamily.regular,
+    fontSize: Typography.fontSize.xs,
     color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  batteryShell: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  batteryBody: {
-    flex: 1,
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  batteryFill: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    bottom: 0,
-    borderRadius: BorderRadius.sm,
-  },
-  segmentLine: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: 1,
-    backgroundColor: Colors.overlay,
-  },
-  batteryTerminal: {
-    width: 6,
-    height: 12,
-    backgroundColor: Colors.textMuted,
-    borderTopRightRadius: 3,
-    borderBottomRightRadius: 3,
-    marginLeft: 2,
+  backupValue: {
+    fontFamily: Typography.fontFamily.bold,
+    fontSize: Typography.fontSize.lg,
+    color: Colors.textPrimary,
+    marginTop: 2,
   },
 });

@@ -10,6 +10,7 @@ interface StatusCardProps {
   accentColor?: string;
   glowColor?: string;
   large?: boolean;
+  amoled?: boolean;
 }
 
 export function StatusCard({
@@ -20,13 +21,18 @@ export function StatusCard({
   accentColor = Colors.amber,
   glowColor,
   large,
+  amoled,
 }: StatusCardProps) {
-  const glow = glowColor ?? accentColor + '22';
+  const glow = glowColor ?? accentColor + '10';
 
   return (
-    <View style={[styles.card, { borderColor: accentColor + '33' }]}>
+    <View style={[
+      styles.card, 
+      { borderColor: accentColor + '33' },
+      amoled && { backgroundColor: '#000000', borderColor: '#222' }
+    ]}>
       {/* Glow layer */}
-      <View style={[styles.glowLayer, { backgroundColor: glow }]} />
+      {!amoled && <View style={[styles.glowLayer, { backgroundColor: glow }]} />}
 
       <View style={styles.iconContainer}>
         <Text style={styles.icon}>{icon}</Text>

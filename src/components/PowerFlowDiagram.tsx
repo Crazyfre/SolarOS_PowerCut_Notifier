@@ -24,6 +24,7 @@ interface PowerFlowProps {
   usePower?: number;
   wirePower?: number;
   batterySoc?: number;
+  preferredUnit?: 'kW' | 'W';
 }
 
 // Flow dot component that animates along a path with symmetric speed
@@ -81,9 +82,17 @@ export function PowerFlowDiagram({
   usePower = 0,
   wirePower = 0,
   batterySoc = 0,
+  preferredUnit = 'W',
 }: PowerFlowProps) {
   const isDischarging = batteryStatus === 'DISCHARGE';
   const isCharging = batteryStatus === 'CHARGE';
+
+  const formatPower = (watts: number) => {
+    if (preferredUnit === 'kW') {
+      return `${(watts / 1000).toFixed(2)}kW`;
+    }
+    return `${Math.round(watts)}W`;
+  };
 
   // Node positions (relative to a 280×230 canvas) forming a perfect symmetric cross (90px spacing)
   const nodes = {
@@ -209,9 +218,9 @@ export function PowerFlowDiagram({
             <Text style={styles.nodeLabelTitle}>Grid</Text>
             {gridOn && (
               wirePower > 0 ? (
-                <Text style={styles.subText}>{wirePower}W</Text>
+                <Text style={styles.subText}>{formatPower(wirePower)}</Text>
               ) : wirePower < 0 ? (
-                <Text style={styles.subText}>{Math.abs(wirePower)}W</Text>
+                <Text style={styles.subText}>{formatPower(Math.abs(wirePower))}</Text>
               ) : (
                 <Text style={styles.subText}>0W</Text>
               )
@@ -219,7 +228,7 @@ export function PowerFlowDiagram({
           </View>
           <View style={[styles.nodeLabel, { left: nodes.solar.x - 30, top: nodes.solar.y - 28, width: 60 }]}>
             <Text style={styles.nodeLabelTitle}>Solar</Text>
-            {pvPower > 0 && <Text style={styles.subText}>{pvPower}W</Text>}
+            {pvPower > 0 && <Text style={styles.subText}>{formatPower(pvPower)}</Text>}
           </View>
           <View style={[styles.nodeLabel, { left: nodes.inverter.x - 30, top: nodes.inverter.y + 22, width: 60 }]}>
             <Text style={styles.nodeLabelTitle}>Inverter</Text>
@@ -230,7 +239,7 @@ export function PowerFlowDiagram({
           </View>
           <View style={[styles.nodeLabel, { left: nodes.house.x - 30, top: nodes.house.y + 20, width: 60 }]}>
             <Text style={styles.nodeLabelTitle}>Load</Text>
-            {usePower > 0 && <Text style={styles.subText}>{usePower}W</Text>}
+            {usePower > 0 && <Text style={styles.subText}>{formatPower(usePower)}</Text>}
           </View>
 
           {/* Animated flow dots (symmetric speed) */}
