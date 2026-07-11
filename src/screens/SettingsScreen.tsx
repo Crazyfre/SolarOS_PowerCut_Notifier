@@ -17,7 +17,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { unregisterBackgroundFetch } from '../services/backgroundFetch';
 import { StationService, SolarStation } from '../services/stationService';
 import { DevOverridesStore } from '../storage/devOverridesStore';
-import { sendTestNotification } from '../services/notifications';
+import { sendTestNotification, ALARM_SOUND_OPTIONS } from '../services/notifications';
 
 type RootStackParamList = {
   Dashboard: undefined;
@@ -42,6 +42,7 @@ export function SettingsScreen() {
   const [useAlarmSound, setUseAlarmSound] = useState(settings.useAlarmSound);
   const [alarmDuration, setAlarmDuration] = useState(settings.alarmDurationSeconds);
   const [onlyAlarmNoPopup, setOnlyAlarmNoPopup] = useState(settings.onlyAlarmNoPopup);
+  const [alarmSoundName, setAlarmSoundName] = useState(settings.alarmSoundName ?? 'alarm');
   
   const [alertOnPowerCut, setAlertOnPowerCut] = useState(settings.alertOnPowerCut);
   const [alertOnGridOffOnly, setAlertOnGridOffOnly] = useState(settings.alertOnGridOffOnly);
@@ -123,6 +124,7 @@ export function SettingsScreen() {
       alarmDurationSeconds: alarmDuration,
       useAlarmSound,
       onlyAlarmNoPopup,
+      alarmSoundName,
       alertOnPowerCut,
       alertOnGridOffOnly,
       alertOnBatteryDischarge,
@@ -261,6 +263,36 @@ export function SettingsScreen() {
                 ))}
               </View>
             </View>
+
+            {useAlarmSound && (
+              <>
+                <View style={styles.separator} />
+                <View style={styles.column}>
+                  <Text style={styles.rowTitle}>Select Alarm Tone</Text>
+                  <View style={styles.soundSelector}>
+                    {ALARM_SOUND_OPTIONS.map((option) => (
+                      <TouchableOpacity
+                        key={option.id}
+                        style={[
+                          styles.soundButton,
+                          alarmSoundName === option.id && styles.soundButtonActive,
+                        ]}
+                        onPress={() => setAlarmSoundName(option.id)}
+                      >
+                        <Text
+                          style={[
+                            styles.soundText,
+                            alarmSoundName === option.id && styles.soundTextActive,
+                          ]}
+                        >
+                          {option.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              </>
+            )}
           </View>
         </View>
 
@@ -520,6 +552,7 @@ export function SettingsScreen() {
                       alarmDurationSeconds: alarmDuration,
                       useAlarmSound,
                       onlyAlarmNoPopup,
+                      alarmSoundName,
                       alertOnPowerCut,
                       alertOnGridOffOnly,
                       alertOnBatteryDischarge,
@@ -977,5 +1010,34 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSize.base,
     color: Colors.textPrimary,
     textAlign: 'center',
+  },
+  soundSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  soundButton: {
+    flex: 1,
+    minWidth: '45%', // two buttons per row
+    backgroundColor: Colors.surfaceElevated,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+  },
+  soundButtonActive: {
+    backgroundColor: Colors.amberGlow,
+    borderColor: Colors.amber + '44',
+  },
+  soundText: {
+    fontFamily: Typography.fontFamily.medium,
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textMuted,
+  },
+  soundTextActive: {
+    color: Colors.amberLight,
+    fontFamily: Typography.fontFamily.bold,
   },
 });

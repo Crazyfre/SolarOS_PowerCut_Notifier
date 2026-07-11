@@ -72,6 +72,7 @@ export interface AppSettings {
   alarmDurationSeconds: number;        // 5, 10, 15, 30 seconds
   useAlarmSound: boolean;              // true = alarm.wav, false = default system sound
   onlyAlarmNoPopup: boolean;           // true = silences the banner (low importance), keeps sound
+  alarmSoundName: 'alarm' | 'siren' | 'digital_beep' | 'chime';
   alertOnPowerCut: boolean;
   alertOnGridOffOnly: boolean;
   alertOnBatteryDischarge: boolean;

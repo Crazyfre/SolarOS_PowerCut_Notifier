@@ -2,7 +2,7 @@
   "expo": {
     "name": "SolarGuard",
     "slug": "solarguard",
-    "version": "2.1.1",
+    "version": "2.1.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -47,7 +47,10 @@
           "color": "#F59E0B",
           "defaultChannel": "default",
           "sounds": [
-            "./assets/alarm.wav"
+            "./assets/alarm.wav",
+            "./assets/siren.wav",
+            "./assets/digital_beep.wav",
+            "./assets/chime.wav"
           ]
         }
       ],

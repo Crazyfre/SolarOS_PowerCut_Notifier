@@ -4,6 +4,13 @@ import { Platform } from 'react-native';
 import { TelemetryData, AppSettings } from '../types/telemetry';
 import { DEFAULT_SETTINGS } from '../storage/settingsStore';
 
+export const ALARM_SOUND_OPTIONS = [
+  { id: 'alarm' as const, name: 'Classic Siren', file: 'alarm.wav' },
+  { id: 'siren' as const, name: 'Emergency Warble', file: 'siren.wav' },
+  { id: 'digital_beep' as const, name: 'Digital Alert Beeps', file: 'digital_beep.wav' },
+  { id: 'chime' as const, name: 'Gentle Chime', file: 'chime.wav' },
+];
+
 // ─── Expo Go guard ────────────────────────────────────────────────────────────
 const isExpoGo =
   Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
@@ -55,23 +62,44 @@ export async function requestNotificationPermissions(): Promise<boolean> {
       lightColor: '#F59E0B',
     });
 
-    // 4. Power Cut Alarms (Max importance, custom alarm sound, popup banner)
+    // 4. Power Cut Alarms (Default/legacy channel, custom alarm sound)
     await Notifications.setNotificationChannelAsync('solarguard_alarm', {
-      name: 'Power Cut Alarms',
+      name: 'Power Cut Alarms (Default)',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 500, 250, 500, 250, 500],
       lightColor: '#EF4444',
-      sound: 'alarm.wav',
+      sound: 'alarm',
     });
 
-    // 5. Silent Power Cut Alarms (Default importance, custom alarm sound, no popup)
+    // 5. Silent Power Cut Alarms (Default/legacy channel, custom alarm sound, no popup)
     await Notifications.setNotificationChannelAsync('solarguard_silent_alarm', {
-      name: 'Silent Power Cut Alarms',
+      name: 'Silent Power Cut Alarms (Default)',
       importance: Notifications.AndroidImportance.DEFAULT,
       vibrationPattern: [0, 500, 250, 500],
       lightColor: '#EF4444',
-      sound: 'alarm.wav',
+      sound: 'alarm',
     });
+
+    // 6. Register specific channels for each customizable alarm sound
+    for (const option of ALARM_SOUND_OPTIONS) {
+      // Standard channel (Max importance, alert banner popup)
+      await Notifications.setNotificationChannelAsync(`sg_alarm_${option.id}`, {
+        name: `Power Cut Alarm (${option.name})`,
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 500, 250, 500, 250, 500],
+        lightColor: '#EF4444',
+        sound: option.id, // Android resource name without extension
+      });
+
+      // Silent/No-Popup channel (Default importance, keeps sound)
+      await Notifications.setNotificationChannelAsync(`sg_silent_alarm_${option.id}`, {
+        name: `Silent Alarm (${option.name})`,
+        importance: Notifications.AndroidImportance.DEFAULT,
+        vibrationPattern: [0, 500, 250, 500],
+        lightColor: '#EF4444',
+        sound: option.id,
+      });
+    }
   }
 
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -93,7 +121,7 @@ async function scheduleNotification(
   return await Notifications.scheduleNotificationAsync({ content, trigger: null });
 }
 
-// ─── Dynamic routing helper ──────────────────────────────────────────────────
+// ─── Sound Options & Dynamic routing helper ────────────────────────────────────
 
 interface RouteConfig {
   channelId: string;
@@ -106,11 +134,13 @@ function getNotificationRouting(
 ): RouteConfig {
   const useAlarm = isCritical && settings.useAlarmSound;
   const noPopup = settings.onlyAlarmNoPopup;
+  const soundId = settings.alarmSoundName ?? 'alarm';
 
   if (useAlarm) {
+    const option = ALARM_SOUND_OPTIONS.find(o => o.id === soundId) ?? ALARM_SOUND_OPTIONS[0];
     return {
-      channelId: noPopup ? 'solarguard_silent_alarm' : 'solarguard_alarm',
-      sound: 'alarm.wav',
+      channelId: noPopup ? `sg_silent_alarm_${soundId}` : `sg_alarm_${soundId}`,
+      sound: Platform.OS === 'ios' ? option.file : option.id,
     };
   }
 

@@ -7,6 +7,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   alarmDurationSeconds: 10,
   useAlarmSound: true,
   onlyAlarmNoPopup: false,
+  alarmSoundName: 'alarm',
   alertOnPowerCut: true,
   alertOnGridOffOnly: false,
   alertOnBatteryDischarge: false,
