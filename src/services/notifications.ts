@@ -1,6 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
+import { Audio } from 'expo-av';
 import { TelemetryData, AppSettings } from '../types/telemetry';
 import { DEFAULT_SETTINGS } from '../storage/settingsStore';
 
@@ -128,6 +129,80 @@ interface RouteConfig {
   sound: string | boolean;
 }
 
+let activeSoundInstance: Audio.Sound | null = null;
+
+export async function stopActiveAlarmSound(): Promise<void> {
+  try {
+    if (activeSoundInstance) {
+      await activeSoundInstance.stopAsync();
+      await activeSoundInstance.unloadAsync();
+      activeSoundInstance = null;
+    }
+  } catch (err) {
+    console.warn('[Notifications] Failed to stop alarm sound:', err);
+  }
+}
+
+export async function playAlarmSoundDirectly(
+  soundName: string,
+  durationSeconds: number
+): Promise<void> {
+  try {
+    // Stop any existing playing sound
+    await stopActiveAlarmSound();
+
+    // Configure audio mode to ensure speaker output even on silent/mute
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      playThroughEarpieceAndroid: false,
+    });
+
+    const soundObject = new Audio.Sound();
+    
+    // Resolve asset source
+    let asset;
+    switch (soundName) {
+      case 'siren':
+        asset = require('../../assets/siren.wav');
+        break;
+      case 'digital_beep':
+        asset = require('../../assets/digital_beep.wav');
+        break;
+      case 'chime':
+        asset = require('../../assets/chime.wav');
+        break;
+      case 'alarm':
+      default:
+        asset = require('../../assets/alarm.wav');
+        break;
+    }
+
+    // Load and play sound
+    await soundObject.loadAsync(asset);
+    await soundObject.setIsLoopingAsync(true);
+    await soundObject.playAsync();
+    activeSoundInstance = soundObject;
+
+    // Schedule stop/silence
+    if (durationSeconds > 0) {
+      setTimeout(async () => {
+        try {
+          if (activeSoundInstance === soundObject) {
+            await soundObject.stopAsync();
+            await soundObject.unloadAsync();
+            activeSoundInstance = null;
+          }
+        } catch (err) {
+          console.warn('[Notifications] Failed to auto-silence sound:', err);
+        }
+      }, durationSeconds * 1000);
+    }
+  } catch (error) {
+    console.error('[Notifications] Failed to play alarm sound directly:', error);
+  }
+}
+
 function getNotificationRouting(
   isCritical: boolean,
   settings: AppSettings
@@ -160,6 +235,10 @@ export async function sendPowerCutNotification(
   const soc = telemetry.batterySoc ?? 0;
   const load = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
   const routing = getNotificationRouting(true, settings);
+
+  if (settings.useAlarmSound) {
+    playAlarmSoundDirectly(settings.alarmSoundName ?? 'alarm', settings.alarmDurationSeconds).catch(() => {});
+  }
 
   const id = await scheduleNotification({
     title: '⚡ Power Cut Detected',
@@ -238,6 +317,10 @@ export async function sendBatteryCriticalNotification(
 ): Promise<void> {
   const routing = getNotificationRouting(true, settings);
 
+  if (settings.useAlarmSound) {
+    playAlarmSoundDirectly(settings.alarmSoundName ?? 'alarm', settings.alarmDurationSeconds).catch(() => {});
+  }
+
   const id = await scheduleNotification({
     title: '🚨 Battery Critical',
     body: `Battery at ${soc}% — shutdown imminent if grid doesn't restore soon.`,
@@ -313,6 +396,10 @@ export async function sendTestNotification(
   settings: AppSettings = DEFAULT_SETTINGS
 ): Promise<void> {
   const routing = getNotificationRouting(true, settings);
+
+  if (settings.useAlarmSound) {
+    playAlarmSoundDirectly(settings.alarmSoundName ?? 'alarm', settings.alarmDurationSeconds).catch(() => {});
+  }
 
   const id = await scheduleNotification({
     title: '🚨 Outage Alarm Test',
