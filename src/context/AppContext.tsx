@@ -13,6 +13,7 @@ import { fetchTelemetry } from '../api/solar';
 import { detectAndAlert, loadOutageHistory } from '../services/stateDetector';
 import { TelemetryData, OutageRecord, AuthTokens, AppSettings } from '../types/telemetry';
 import { SettingsStore, DEFAULT_SETTINGS } from '../storage/settingsStore';
+import { checkForUpdates, UpdateInfo } from '../services/updateChecker';
 
 // ─── Context types ────────────────────────────────────────────────────────────
 
@@ -38,6 +39,9 @@ interface AppContextValue {
   // Settings
   settings: AppSettings;
   updateSettings: (newSettings: AppSettings) => Promise<void>;
+
+  // Updates
+  updateInfo: UpdateInfo | null;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -58,6 +62,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
 
   const [outageHistory, setOutageHistory] = useState<OutageRecord[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -77,6 +82,9 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
           const history = await loadOutageHistory();
           setOutageHistory(history);
         }
+        
+        // Check for updates on startup
+        checkForUpdates().then(setUpdateInfo).catch(() => {});
       } finally {
         setIsAuthLoading(false);
       }
@@ -198,6 +206,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
         reloadHistory,
         settings,
         updateSettings,
+        updateInfo,
       }}
     >
       {children}

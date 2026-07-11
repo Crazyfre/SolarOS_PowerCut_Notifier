@@ -121,11 +121,18 @@ export async function fetchTelemetry(systemId: string): Promise<TelemetryData> {
   let token = await getValidToken();
   let client = createClient(token);
 
+  const mapTelemetry = (data: any): TelemetryData => {
+    return {
+      ...data,
+      pvPower: data.pvPower ?? data.generationPower,
+    };
+  };
+
   try {
     const response = await client.get<TelemetryData>(
       `/maintain-s/operating/system/${systemId}`
     );
-    return response.data;
+    return mapTelemetry(response.data);
   } catch (error: unknown) {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
       // Force refresh and retry once
@@ -140,7 +147,7 @@ export async function fetchTelemetry(systemId: string): Promise<TelemetryData> {
         const retryResponse = await client.get<TelemetryData>(
           `/maintain-s/operating/system/${systemId}`
         );
-        return retryResponse.data;
+        return mapTelemetry(retryResponse.data);
       }
       throw new Error('AUTH_REQUIRED');
     }

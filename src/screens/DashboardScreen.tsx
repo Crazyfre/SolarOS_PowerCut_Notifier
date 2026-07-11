@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   StatusBar,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../theme';
@@ -29,7 +30,7 @@ function formatTime(ts: number | null): string {
 }
 
 export function DashboardScreen() {
-  const { telemetry, isFetching, fetchError, refreshTelemetry, lastFetchTime } = useApp();
+  const { telemetry, isFetching, fetchError, refreshTelemetry, lastFetchTime, updateInfo } = useApp();
   const navigation = useNavigation<any>();
   const [outageStart, setOutageStart] = useState<number | null>(null);
 
@@ -102,6 +103,22 @@ export function DashboardScreen() {
           </View>
         ) : null}
 
+        {/* Update Available Banner */}
+        {updateInfo?.updateAvailable && (
+          <TouchableOpacity
+            style={styles.updateBanner}
+            onPress={() => Linking.openURL(updateInfo.releaseUrl).catch(() => {})}
+            activeOpacity={0.8}
+            testID="update-banner"
+          >
+            <View style={styles.updateBannerGlow} />
+            <Text style={styles.updateBannerText}>
+              🚀 A new update ({updateInfo.latestVersion}) is available!{' '}
+              <Text style={styles.updateBannerLink}>Tap to download.</Text>
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {/* Expo Go notice — notifications require a dev build */}
         {isRunningInExpoGo() && (
           <View style={styles.expoGoBanner}>
@@ -137,6 +154,8 @@ export function DashboardScreen() {
                   <Text style={styles.gridBannerSub}>
                     {telemetry.wirePower > 0
                       ? `Drawing ${telemetry.wirePower}W from mains`
+                      : telemetry.wirePower < 0
+                      ? `Exporting ${Math.abs(telemetry.wirePower)}W to grid`
                       : 'Standby — running on solar/battery'}
                   </Text>
                 </View>
@@ -163,7 +182,15 @@ export function DashboardScreen() {
                   <StatusCard
                     title="Grid"
                     value={isGridOn ? 'Available' : 'OFFLINE'}
-                    subtitle={isGridOn ? `${telemetry.wirePower ?? 0}W import` : 'Power cut active'}
+                    subtitle={
+                      !isGridOn
+                        ? 'Power cut active'
+                        : telemetry.wirePower > 0
+                        ? `${telemetry.wirePower}W import`
+                        : telemetry.wirePower < 0
+                        ? `${Math.abs(telemetry.wirePower)}W export`
+                        : '0W standby'
+                    }
                     icon={isGridOn ? '🔌' : '🚫'}
                     accentColor={isGridOn ? Colors.success : Colors.danger}
                   />
@@ -450,6 +477,31 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily.mono,
     fontSize: Typography.fontSize.xs,
     color: Colors.textMuted,
+  },
+  updateBanner: {
+    backgroundColor: Colors.blueGlow,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.blue + '44',
+    padding: Spacing.md,
+    marginBottom: Spacing.base,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  updateBannerGlow: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: Colors.blue + '08',
+  },
+  updateBannerText: {
+    fontFamily: Typography.fontFamily.medium,
+    fontSize: Typography.fontSize.sm,
+    color: Colors.blueLight,
+    lineHeight: 18,
+  },
+  updateBannerLink: {
+    fontFamily: Typography.fontFamily.bold,
+    color: Colors.blueLight,
+    textDecorationLine: 'underline',
   },
   rawVal: {
     fontFamily: Typography.fontFamily.mono,

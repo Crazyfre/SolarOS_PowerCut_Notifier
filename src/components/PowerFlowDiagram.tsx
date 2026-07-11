@@ -207,7 +207,15 @@ export function PowerFlowDiagram({
           {/* Overlay text labels below/above nodes */}
           <View style={[styles.nodeLabel, { left: nodes.grid.x - 30, top: nodes.grid.y + 20, width: 60 }]}>
             <Text style={styles.nodeLabelTitle}>Grid</Text>
-            {gridOn && wirePower > 0 && <Text style={styles.subText}>{wirePower}W</Text>}
+            {gridOn && (
+              wirePower > 0 ? (
+                <Text style={styles.subText}>{wirePower}W</Text>
+              ) : wirePower < 0 ? (
+                <Text style={styles.subText}>{Math.abs(wirePower)}W</Text>
+              ) : (
+                <Text style={styles.subText}>0W</Text>
+              )
+            )}
           </View>
           <View style={[styles.nodeLabel, { left: nodes.solar.x - 30, top: nodes.solar.y - 28, width: 60 }]}>
             <Text style={styles.nodeLabelTitle}>Solar</Text>
@@ -231,6 +239,14 @@ export function PowerFlowDiagram({
               color={Colors.success}
               x1={nodes.grid.x + 18} y1={nodes.grid.y}
               x2={nodes.inverter.x - 20} y2={nodes.inverter.y}
+              delay={0}
+            />
+          )}
+          {gridOn && wirePower < 0 && (
+            <FlowDot
+              color={Colors.success}
+              x1={nodes.inverter.x - 20} y1={nodes.inverter.y}
+              x2={nodes.grid.x + 18} y2={nodes.grid.y}
               delay={0}
             />
           )}
