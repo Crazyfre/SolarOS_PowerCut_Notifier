@@ -45,3 +45,10 @@ google-service-account.json
 .env
 .env.local
 .env.production
+
+# Agent / AI local directories
+.claude/
+.gemini/
+.agents/
+scratch/
+CLAUDE.md
