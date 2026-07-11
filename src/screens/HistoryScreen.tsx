@@ -60,12 +60,7 @@ function OutageCard({ item, index }: { item: OutageRecord; index: number }) {
   const isOngoing = !item.endTime;
   const duration = item.endTime ? item.endTime - item.startTime : undefined;
   const isAmoled = settings?.amoledTheme ?? false;
-  const preferredUnit = settings?.preferredUnit ?? 'W';
-
   const formatPower = (watts: number) => {
-    if (preferredUnit === 'kW') {
-      return `${(watts / 1000).toFixed(2)} kW`;
-    }
     return `${Math.round(watts)} W`;
   };
 

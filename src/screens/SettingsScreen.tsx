@@ -33,6 +33,7 @@ export function SettingsScreen() {
   const [onlyAlarmNoPopup, setOnlyAlarmNoPopup] = useState(settings.onlyAlarmNoPopup);
   
   const [alertOnPowerCut, setAlertOnPowerCut] = useState(settings.alertOnPowerCut);
+  const [alertOnGridOffOnly, setAlertOnGridOffOnly] = useState(settings.alertOnGridOffOnly);
   const [alertOnBatteryDischarge, setAlertOnBatteryDischarge] = useState(settings.alertOnBatteryDischarge);
   const [alertOnOverSolarLoad, setAlertOnOverSolarLoad] = useState(settings.alertOnOverSolarLoad);
   
@@ -44,7 +45,6 @@ export function SettingsScreen() {
   // V2 State variables
   const [batteryCapacity, setBatteryCapacity] = useState(String(settings.batteryCapacity ?? 5.12));
   const [refreshInterval, setRefreshInterval] = useState(settings.refreshIntervalMinutes ?? 5);
-  const [preferredUnit, setPreferredUnit] = useState<'W' | 'kW'>(settings.preferredUnit ?? 'W');
   const [amoledTheme, setAmoledTheme] = useState(settings.amoledTheme ?? false);
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(settings.quietHoursEnabled ?? false);
   const [quietHoursStart, setQuietHoursStart] = useState(settings.quietHoursStart ?? '23:00');
@@ -99,6 +99,7 @@ export function SettingsScreen() {
       useAlarmSound,
       onlyAlarmNoPopup,
       alertOnPowerCut,
+      alertOnGridOffOnly,
       alertOnBatteryDischarge,
       alertOnOverSolarLoad,
       alertOnBatteryPercent,
@@ -109,7 +110,6 @@ export function SettingsScreen() {
       quietHoursStart,
       quietHoursEnd,
       quietHoursEnabled,
-      preferredUnit,
       amoledTheme,
     };
 
@@ -239,6 +239,21 @@ export function SettingsScreen() {
 
             <View style={styles.row}>
               <View style={styles.rowInfo}>
+                <Text style={styles.rowTitle}>Grid Off Alerts Only</Text>
+                <Text style={styles.rowSub}>Trigger alarm only when grid goes offline</Text>
+              </View>
+              <Switch
+                value={alertOnGridOffOnly}
+                onValueChange={setAlertOnGridOffOnly}
+                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
+                thumbColor={alertOnGridOffOnly ? Colors.textInverse : Colors.textMuted}
+              />
+            </View>
+
+            <View style={styles.separator} />
+
+            <View style={styles.row}>
+              <View style={styles.rowInfo}>
                 <Text style={styles.rowTitle}>Battery Discharging</Text>
                 <Text style={styles.rowSub}>Alert when grid is on but using battery</Text>
               </View>
@@ -345,35 +360,6 @@ export function SettingsScreen() {
                   placeholder="5.12"
                 />
                 <Text style={styles.capacityUnit}>kWh</Text>
-              </View>
-            </View>
-
-            <View style={styles.separator} />
-
-            {/* Preferred Units */}
-            <View style={styles.column}>
-              <Text style={styles.rowTitle}>Preferred Power Units</Text>
-              <Text style={styles.rowSub}>Format power numbers in Watts or Kilowatts</Text>
-              <View style={styles.durationSelector}>
-                {(['W', 'kW'] as const).map((unit) => (
-                  <TouchableOpacity
-                    key={unit}
-                    style={[
-                      styles.durationButton,
-                      preferredUnit === unit && styles.durationButtonActive,
-                    ]}
-                    onPress={() => setPreferredUnit(unit)}
-                  >
-                    <Text
-                      style={[
-                        styles.durationText,
-                        preferredUnit === unit && styles.durationTextActive,
-                      ]}
-                    >
-                      {unit === 'W' ? 'Watts (W)' : 'Kilowatts (kW)'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
               </View>
             </View>
 

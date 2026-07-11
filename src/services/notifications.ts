@@ -128,7 +128,7 @@ export async function sendPowerCutNotification(
   settings: AppSettings = DEFAULT_SETTINGS
 ): Promise<void> {
   const soc = telemetry.batterySoc ?? 0;
-  const load = telemetry.usePower ?? telemetry.dischargePower ?? 0;
+  const load = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
   const routing = getNotificationRouting(true, settings);
 
   await scheduleNotification({

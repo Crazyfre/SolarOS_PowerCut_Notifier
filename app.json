@@ -2,7 +2,7 @@
   "expo": {
     "name": "SolarGuard",
     "slug": "solarguard",
-    "version": "1.1.1",
+    "version": "2.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",

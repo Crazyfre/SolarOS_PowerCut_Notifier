@@ -24,7 +24,6 @@ interface PowerFlowProps {
   usePower?: number;
   wirePower?: number;
   batterySoc?: number;
-  preferredUnit?: 'kW' | 'W';
 }
 
 // Flow dot component that animates along a path with symmetric speed
@@ -82,15 +81,11 @@ export function PowerFlowDiagram({
   usePower = 0,
   wirePower = 0,
   batterySoc = 0,
-  preferredUnit = 'W',
 }: PowerFlowProps) {
   const isDischarging = batteryStatus === 'DISCHARGE';
   const isCharging = batteryStatus === 'CHARGE';
 
   const formatPower = (watts: number) => {
-    if (preferredUnit === 'kW') {
-      return `${(watts / 1000).toFixed(2)}kW`;
-    }
     return `${Math.round(watts)}W`;
   };
 

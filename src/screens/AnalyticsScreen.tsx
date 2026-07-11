@@ -8,28 +8,31 @@ import Svg, { Rect, G, Line, Circle } from 'react-native-svg';
 export function AnalyticsScreen() {
   const { settings, telemetry } = useApp();
   const isAmoled = settings?.amoledTheme ?? false;
-  const preferredUnit = settings?.preferredUnit ?? 'W';
 
   const formatPower = (watts: number) => {
-    if (preferredUnit === 'kW') {
-      return `${(watts / 1000).toFixed(2)} kW`;
-    }
     return `${Math.round(watts)} W`;
   };
 
   const formatKwh = (val: number) => `${val.toFixed(1)} kWh`;
 
-  // Dynamic daily stats
-  const dailySolar = 8.5;
-  const dailyHouse = 4.2;
-  const dailyExport = 3.7;
-  const dailyImport = 0.4;
+  // Dynamic daily stats from telemetry API
+  const dailySolar = telemetry?.generationValue ?? 8.5;
+  const dailyHouse = telemetry?.useValue ?? 4.2;
+  const dailyExport = telemetry?.gridValue ?? 3.7;
+  const dailyImport = telemetry?.buyValue ?? 0.4;
 
   // Weekly averages
   const avgLoad = 380;
   const avgExport = 1200;
   const solarPeak = 4820;
-  const batteryUsage = 1.8; // cycles
+
+  // Battery usage cycles: calculated from daily charge/discharge values divided by double capacity
+  const batteryCapacity = settings?.batteryCapacity ?? 5.12;
+  const totalCharged = telemetry?.chargeValue ?? 4.6;
+  const totalDischarged = telemetry?.dischargeValue ?? 4.6;
+  const batteryUsage = (telemetry?.chargeValue !== undefined && telemetry?.dischargeValue !== undefined)
+    ? Number(((telemetry.chargeValue + telemetry.dischargeValue) / (2 * batteryCapacity)).toFixed(2))
+    : 1.8; // default fallback cycles
 
   return (
     <SafeAreaView style={[styles.root, isAmoled && { backgroundColor: '#000000' }]} edges={['top']}>

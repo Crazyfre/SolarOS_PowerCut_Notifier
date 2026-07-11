@@ -75,13 +75,13 @@ export async function detectAndAlert(
     const outage: OutageRecord = {
       id: `outage_${now}`,
       startTime: now,
-      maxLoadW: telemetry.usePower ?? telemetry.dischargePower ?? 0,
+      maxLoadW: telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0),
       minBatterySoc: telemetry.batterySoc,
     };
     history.push(outage);
     await saveOutageHistory(history);
 
-    if (settings.alertOnPowerCut) {
+    if (settings.alertOnPowerCut || settings.alertOnGridOffOnly) {
       await sendPowerCutNotification(telemetry, settings);
     }
   } else if (lastStatus === 'off' && currentStatus === 'on') {
@@ -105,7 +105,7 @@ export async function detectAndAlert(
       await saveOutageHistory(history);
     }
 
-    if (settings.alertOnPowerCut) {
+    if (settings.alertOnPowerCut && !settings.alertOnGridOffOnly) {
       await sendGridRestoredNotification(durationMs, telemetry.batterySoc ?? 0, settings, socDrop);
     }
   }
@@ -114,7 +114,7 @@ export async function detectAndAlert(
 
   if (currentStatus === 'off') {
     const soc = telemetry.batterySoc ?? 100;
-    const load = telemetry.usePower ?? telemetry.dischargePower ?? 0;
+    const load = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
 
     if (settings.alertOnBatteryPercent) {
       const critThreshold = Math.min(10, settings.batteryWarningThreshold - 5);
@@ -138,7 +138,7 @@ export async function detectAndAlert(
       if (last.minBatterySoc === undefined || soc < last.minBatterySoc) {
         last.minBatterySoc = soc;
       }
-      const currentLoad = telemetry.usePower ?? telemetry.dischargePower ?? 0;
+      const currentLoad = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
       if (last.maxLoadW === undefined || currentLoad > last.maxLoadW) {
         last.maxLoadW = currentLoad;
       }
@@ -153,7 +153,7 @@ export async function detectAndAlert(
     const lastBatStatus = await AsyncStorage.getItem(LAST_BATTERY_STATUS_KEY);
 
     if (currentBatStatus === 'DISCHARGE' && lastBatStatus !== 'DISCHARGE') {
-      const load = telemetry.usePower ?? telemetry.dischargePower ?? 0;
+      const load = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
       await sendBatteryDischargingNotification(load, settings);
     }
     await AsyncStorage.setItem(LAST_BATTERY_STATUS_KEY, currentBatStatus);

@@ -53,8 +53,8 @@ export function OutageAlert({ telemetry, outageStartTime }: OutageAlertProps) {
   const elapsed = useElapsedTime(outageStartTime);
 
   const soc = telemetry.batterySoc ?? 0;
-  const load = telemetry.usePower ?? telemetry.dischargePower ?? 0;
-  const discharge = telemetry.dischargePower ?? 0;
+  const load = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
+  const discharge = Math.abs(telemetry.batteryPower ?? 0);
 
   // Pulsing border/glow
   useEffect(() => {

@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   useAlarmSound: true,
   onlyAlarmNoPopup: false,
   alertOnPowerCut: true,
+  alertOnGridOffOnly: false,
   alertOnBatteryDischarge: false,
   alertOnOverSolarLoad: false,
   alertOnBatteryPercent: true,
@@ -18,7 +19,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   quietHoursStart: '23:00',
   quietHoursEnd: '07:00',
   quietHoursEnabled: false,
-  preferredUnit: 'W',
   amoledTheme: false,
 };
 

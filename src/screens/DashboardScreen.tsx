@@ -73,21 +73,17 @@ export function DashboardScreen() {
   const batteryIsCharging = telemetry?.batteryStatus === 'CHARGE';
   const isAmoled = settings?.amoledTheme ?? false;
 
-  const preferredUnit = settings?.preferredUnit ?? 'W';
   const batteryCapacity = settings?.batteryCapacity ?? 5.12;
 
   const formatPower = (watts: number) => {
-    if (preferredUnit === 'kW') {
-      return `${(watts / 1000).toFixed(2)} kW`;
-    }
     return `${Math.round(watts)} W`;
   };
 
   const getBackupTimeText = () => {
     if (!telemetry) return '—';
     const soc = telemetry.batterySoc ?? 0;
-    // load is usePower (house load) during outage, fallback to discharge power or 300W
-    const load = telemetry.usePower ?? telemetry.dischargePower ?? 300;
+    // load is usePower (house load) during outage, fallback to battery power or 300W
+    const load = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0) ?? 300;
     const capacityWh = batteryCapacity * 1000;
     const usableEnergyWh = capacityWh * (soc / 100);
     const actualLoad = load > 0 ? load : 100;
@@ -287,11 +283,7 @@ export function DashboardScreen() {
                     subtitle={
                       !isGridOn
                         ? 'Power cut active'
-                        : telemetry.wirePower > 0
-                        ? `▲ Import: ${formatPower(telemetry.wirePower)}`
-                        : telemetry.wirePower < 0
-                        ? `▼ Export: ${formatPower(Math.abs(telemetry.wirePower))}`
-                        : '0W standby'
+                        : `Flow: ${formatPower(Math.abs(telemetry.wirePower))} · Today: ↓${(telemetry.buyValue ?? 0).toFixed(1)} ↑${(telemetry.gridValue ?? 0).toFixed(1)} kWh`
                     }
                     icon={isGridOn ? '🔌' : '🚫'}
                     accentColor={isGridOn ? Colors.success : Colors.danger}
@@ -302,7 +294,7 @@ export function DashboardScreen() {
                   <StatusCard
                     title="House Load"
                     value={formatPower(telemetry.usePower ?? 0)}
-                    subtitle="Current consumption"
+                    subtitle={`Today: ${(telemetry.useValue ?? 0).toFixed(1)} kWh`}
                     icon="🏠"
                     accentColor={Colors.amber}
                     amoled={isAmoled}
@@ -323,10 +315,10 @@ export function DashboardScreen() {
                     }
                     subtitle={
                       telemetry.batteryStatus === 'CHARGE'
-                        ? `+${formatPower(telemetry.chargePower ?? 0)}`
+                        ? `+${formatPower(Math.abs(telemetry.batteryPower ?? 0))} · Today: ${(telemetry.chargeValue ?? 0).toFixed(1)} kWh`
                         : telemetry.batteryStatus === 'DISCHARGE'
-                        ? `-${formatPower(telemetry.dischargePower ?? 0)}`
-                        : '0 W'
+                        ? `-${formatPower(Math.abs(telemetry.batteryPower ?? 0))} · Today: ${(telemetry.dischargeValue ?? 0).toFixed(1)} kWh`
+                        : `0 W · Today: ${(telemetry.chargeValue ?? 0).toFixed(1)} kWh`
                     }
                     icon={
                       telemetry.batteryStatus === 'CHARGE'
@@ -345,7 +337,7 @@ export function DashboardScreen() {
                   <StatusCard
                     title="Solar PV"
                     value={formatPower(telemetry.pvPower ?? 0)}
-                    subtitle="Generation today"
+                    subtitle={`Today: ${(telemetry.generationValue ?? 0).toFixed(1)} kWh`}
                     icon="☀️"
                     accentColor={Colors.amberLight}
                     amoled={isAmoled}
@@ -364,7 +356,6 @@ export function DashboardScreen() {
                   usePower={telemetry.usePower}
                   wirePower={telemetry.wirePower}
                   batterySoc={telemetry.batterySoc}
-                  preferredUnit={preferredUnit}
                 />
               </View>
             </View>
@@ -407,6 +398,7 @@ export function DashboardScreen() {
                   ['batteryStatus', telemetry.batteryStatus],
                   ['batterySoc', `${telemetry.batterySoc ?? 0}%`],
                   ['batteryBv', `${telemetry.batteryBv ?? 0} V`],
+                  ['batteryPower', `${telemetry.batteryPower ?? 0} W`],
                   ['usePower', `${telemetry.usePower ?? 0} W`],
                   ['pvPower', `${telemetry.pvPower ?? 0} W`],
                 ].map(([key, val]) => (
