@@ -28,8 +28,8 @@ export function StatusCard({
   return (
     <View style={[
       styles.card,
-      { borderColor: accentColor + '33' },
-      amoled && { backgroundColor: '#000000', borderColor: '#222' }
+      { borderColor: accentColor + '33', borderLeftWidth: 4, borderLeftColor: accentColor },
+      amoled && { backgroundColor: '#000000', borderColor: '#222', borderLeftWidth: 4, borderLeftColor: accentColor }
     ]}>
       {/* Glow layer — wrapped in View to prevent Fabric in-place mutation crash */}
       <View>
