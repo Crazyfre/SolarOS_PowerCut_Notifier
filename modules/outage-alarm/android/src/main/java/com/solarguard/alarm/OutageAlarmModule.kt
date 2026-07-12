@@ -21,17 +21,19 @@ class OutageAlarmModule : Module() {
     Name("OutageAlarm")
 
     Function("triggerAlarm") { options: TriggerOptions ->
-      val context = appContext.reactContext ?: return@Function
-      OutageAlarmService.start(context, options.reason, options.sound, options.duration)
+      appContext.reactContext?.let { context ->
+        OutageAlarmService.start(context, options.reason, options.sound, options.duration)
+      }
     }
 
     Function("stopAlarm") {
-      val context = appContext.reactContext ?: return@Function
-      OutageAlarmService.stop(context)
+      appContext.reactContext?.let { context ->
+        OutageAlarmService.stop(context)
+      }
     }
 
     Function("isAlarmPlaying") {
-      return@Function OutageAlarmService.isPlaying
+      OutageAlarmService.isPlaying
     }
   }
 }
