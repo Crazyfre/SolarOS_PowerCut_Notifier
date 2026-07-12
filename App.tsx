@@ -2,8 +2,10 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
-import { Text, View, StyleSheet, ActivityIndicator } from 'react-native';
+import { Text, View, StyleSheet, ActivityIndicator, Platform, Dimensions } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useNavigation } from '@react-navigation/native';
 
 import { AppContextProvider, useApp } from './src/context/AppContext';
 import { LoginScreen } from './src/screens/LoginScreen';
@@ -13,6 +15,7 @@ import { SettingsScreen } from './src/screens/SettingsScreen';
 import { AnalyticsScreen } from './src/screens/AnalyticsScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
 import { Colors, Typography, Spacing } from './src/theme';
+import { LayoutDashboard, History, ChartColumn, SunMedium } from 'lucide-react-native';
 
 // Import background task definition so it registers at module load
 import './src/services/backgroundFetch';
@@ -20,51 +23,118 @@ import './src/services/backgroundFetch';
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
-function TabIcon({ icon, focused }: { icon: string; focused: boolean }) {
+function TabIcon({ icon, focused }: { icon: React.ReactNode; focused: boolean }) {
   return (
     <View style={[tabStyles.iconWrap, focused && tabStyles.iconWrapActive]}>
-      <Text style={[tabStyles.icon, focused && tabStyles.iconActive]}>{icon}</Text>
+      {icon}
     </View>
   );
 }
 
+const tabNames = ['Dashboard', 'History', 'Analytics'];
+
+const getActiveRouteName = (navState: any): string => {
+  if (!navState) return 'Dashboard';
+  const route = navState.routes[navState.index];
+  if (route.state) {
+    return getActiveRouteName(route.state);
+  }
+  return route.name;
+};
+
+const screenHeight = Dimensions.get('window').height;
+const headerHeight = 90; // Ignore swipes in top 90px header
+const footerHeight = 90; // Ignore swipes in bottom 90px tab bar
+
 function MainTabs() {
+  const navigation = useNavigation<any>();
+
+  const swipeGesture = Gesture.Pan()
+    .runOnJS(true)
+    .activeOffsetX([-20, 20])
+    .failOffsetY([-20, 20])
+    .onEnd((event) => {
+      // Ignore top header and bottom footer
+      if (event.y < headerHeight || event.y > screenHeight - footerHeight) {
+        return;
+      }
+
+      const threshold = 60; // minimum translation to switch tabs
+      if (event.translationX > threshold) {
+        // Swipe right (finger moves left-to-right) -> Previous screen (idx - 1)
+        const state = navigation.getState();
+        const activeName = getActiveRouteName(state);
+        const idx = tabNames.indexOf(activeName);
+        if (idx > 0) {
+          navigation.navigate('MainTabs', { screen: tabNames[idx - 1] });
+        }
+      } else if (event.translationX < -threshold) {
+        // Swipe left (finger moves right-to-left) -> Next screen (idx + 1)
+        const state = navigation.getState();
+        const activeName = getActiveRouteName(state);
+        const idx = tabNames.indexOf(activeName);
+        if (idx !== -1 && idx < tabNames.length - 1) {
+          navigation.navigate('MainTabs', { screen: tabNames[idx + 1] });
+        }
+      }
+    });
+
   return (
-    <Tab.Navigator
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: styles.tabBar,
-        tabBarActiveTintColor: Colors.amber,
-        tabBarInactiveTintColor: Colors.textMuted,
-        tabBarShowLabel: true,
-        tabBarLabelStyle: styles.tabBarLabel,
-      }}
-    >
-      <Tab.Screen
-        name="Dashboard"
-        component={DashboardScreen}
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon icon="⚡" focused={focused} />,
-          tabBarLabel: 'Dashboard',
-        }}
-      />
-      <Tab.Screen
-        name="History"
-        component={HistoryScreen}
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon icon="📋" focused={focused} />,
-          tabBarLabel: 'History',
-        }}
-      />
-      <Tab.Screen
-        name="Analytics"
-        component={AnalyticsScreen}
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon icon="📊" focused={focused} />,
-          tabBarLabel: 'Analytics',
-        }}
-      />
-    </Tab.Navigator>
+    <GestureDetector gesture={swipeGesture}>
+      <View style={{ flex: 1 }}>
+        <Tab.Navigator
+          screenOptions={{
+            headerShown: false,
+            tabBarStyle: styles.tabBar,
+            tabBarActiveTintColor: Colors.amber,
+            tabBarInactiveTintColor: Colors.textMuted,
+            tabBarShowLabel: true,
+            tabBarLabelStyle: styles.tabBarLabel,
+            freezeOnBlur: true,
+          }}
+        >
+          <Tab.Screen
+            name="Dashboard"
+            component={DashboardScreen}
+            options={{
+              tabBarIcon: ({ focused }) => (
+                <TabIcon
+                  icon={<LayoutDashboard size={20} color={focused ? Colors.amber : Colors.textMuted} />}
+                  focused={focused}
+                />
+              ),
+              tabBarLabel: 'Dashboard',
+            }}
+          />
+          <Tab.Screen
+            name="History"
+            component={HistoryScreen}
+            options={{
+              tabBarIcon: ({ focused }) => (
+                <TabIcon
+                  icon={<History size={20} color={focused ? Colors.amber : Colors.textMuted} />}
+                  focused={focused}
+                />
+              ),
+              tabBarLabel: 'History',
+            }}
+          />
+          <Tab.Screen
+            name="Analytics"
+            component={AnalyticsScreen}
+            options={{
+              tabBarIcon: ({ focused }) => (
+                <TabIcon
+                  icon={<ChartColumn size={20} color={focused ? Colors.amber : Colors.textMuted} />}
+                  focused={focused}
+                />
+              ),
+              tabBarLabel: 'Analytics',
+            }}
+          />
+        </Tab.Navigator>
+      </View>
+    </GestureDetector>
   );
 }
 
@@ -74,7 +144,7 @@ function AppNavigator() {
   if (isAuthLoading) {
     return (
       <View style={styles.splashContainer}>
-        <Text style={styles.splashIcon}>☀️</Text>
+        <SunMedium size={72} color={Colors.amber} style={{ marginBottom: Spacing.base }} />
         <Text style={styles.splashTitle}>SolarGuard</Text>
         <ActivityIndicator
           color={Colors.amber}
@@ -111,7 +181,12 @@ function AppNavigator() {
         },
       }}
     >
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator
+        screenOptions={{
+          headerShown: false,
+          animation: Platform.OS === 'android' ? 'none' : 'default',
+        }}
+      >
         <Stack.Screen name="MainTabs" component={MainTabs} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="About" component={AboutScreen} />
@@ -122,11 +197,13 @@ function AppNavigator() {
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <AppContextProvider>
-        <AppNavigator />
-      </AppContextProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <AppContextProvider>
+          <AppNavigator />
+        </AppContextProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 

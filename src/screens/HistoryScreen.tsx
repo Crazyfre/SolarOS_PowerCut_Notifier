@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,12 +6,23 @@ import {
   FlatList,
   TouchableOpacity,
   StatusBar,
+  Animated,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../theme';
 import { useApp } from '../context/AppContext';
 import { OutageRecord } from '../types/telemetry';
 import Svg, { Line, Circle, Path } from 'react-native-svg';
+import {
+  TriangleAlert,
+  CircleCheckBig,
+  BatteryMedium,
+  BatteryLow,
+  Clock3,
+  Timer,
+  RefreshCcw,
+} from 'lucide-react-native';
 
 function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString([], {
@@ -90,27 +101,36 @@ function OutageCard({ item, index }: { item: OutageRecord; index: number }) {
         )}
       </View>
 
-      <View style={styles.outageTitleRow}>
-        <Text style={styles.outageIcon}>⚡</Text>
+      <View style={[styles.outageTitleRow, { gap: Spacing.sm }]}>
+        <TriangleAlert size={20} color={Colors.danger} />
         <Text style={styles.outageTitle}>Outage</Text>
       </View>
 
       <View style={styles.cardBody}>
         <View style={styles.timeBlock}>
-          <Text style={styles.timeLabel}>Timeline</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+            <Clock3 size={14} color={Colors.textMuted} />
+            <Text style={styles.timeLabel}>Timeline</Text>
+          </View>
           <Text style={styles.timeValue}>
             {formatTime(item.startTime)} {item.endTime ? `→ ${formatTime(item.endTime)}` : ' (Ongoing)'}
           </Text>
         </View>
 
         <View style={[styles.timeBlock, { alignItems: 'flex-end' }]}>
-          <Text style={styles.timeLabel}>Duration</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+            <Timer size={14} color={Colors.textMuted} />
+            <Text style={styles.timeLabel}>Duration</Text>
+          </View>
           <Text style={styles.durationValue}>{formatDuration(duration)}</Text>
         </View>
       </View>
 
       <View style={styles.batteryDropRow}>
-        <Text style={styles.batteryDropLabel}>Battery usage</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <BatteryMedium size={16} color={Colors.textSecondary} />
+          <Text style={styles.batteryDropLabel}>Battery usage</Text>
+        </View>
         <Text style={styles.batteryDropValue}>
           {startSoc}% → {endSoc}%
         </Text>
@@ -157,14 +177,14 @@ function OutageCard({ item, index }: { item: OutageRecord; index: number }) {
 
           <View style={styles.timelineList}>
             <View style={styles.timelineEvent}>
-              <Text style={styles.timelineDot}>●</Text>
+              <TriangleAlert size={14} color={Colors.blueLight} />
               <Text style={styles.timelineEventText}>
                 {formatTime(item.startTime)} - Outage started (Battery 100%)
               </Text>
             </View>
             {endSoc <= (settings?.batteryWarningThreshold ?? 20) && (
               <View style={styles.timelineEvent}>
-                <Text style={[styles.timelineDot, { color: Colors.danger }]}>●</Text>
+                <BatteryLow size={14} color={Colors.danger} />
                 <Text style={styles.timelineEventText}>
                   Battery warning threshold reached
                 </Text>
@@ -172,7 +192,7 @@ function OutageCard({ item, index }: { item: OutageRecord; index: number }) {
             )}
             {item.endTime && (
               <View style={styles.timelineEvent}>
-                <Text style={[styles.timelineDot, { color: Colors.success }]}>●</Text>
+                <CircleCheckBig size={14} color={Colors.success} />
                 <Text style={styles.timelineEventText}>
                   {formatTime(item.endTime)} - Grid restored (Battery {endSoc}%)
                 </Text>
@@ -187,10 +207,27 @@ function OutageCard({ item, index }: { item: OutageRecord; index: number }) {
 
 export function HistoryScreen() {
   const { outageHistory, reloadHistory, settings } = useApp();
+  const spinValue = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     reloadHistory();
   }, []);
+
+  const handleRefresh = () => {
+    spinValue.setValue(0);
+    Animated.timing(spinValue, {
+      toValue: 1,
+      duration: 600,
+      easing: Easing.linear,
+      useNativeDriver: true,
+    }).start();
+    reloadHistory();
+  };
+
+  const spin = spinValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   const sortedHistory = [...outageHistory].reverse(); // newest first
   const isAmoled = settings?.amoledTheme ?? false;
@@ -202,18 +239,23 @@ export function HistoryScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Outage History</Text>
         <TouchableOpacity
-          onPress={reloadHistory}
-          style={styles.refreshBtn}
+          onPress={handleRefresh}
+          style={[styles.refreshBtn, { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }]}
           accessibilityLabel="Refresh history"
           testID="refresh-history-button"
         >
-          <Text style={styles.refreshText}>↻ Refresh</Text>
+          <Animated.View style={{ transform: [{ rotate: spin }] }}>
+            <View>
+              <RefreshCcw size={14} color={Colors.amber} />
+            </View>
+          </Animated.View>
+          <Text style={styles.refreshText}>Refresh</Text>
         </TouchableOpacity>
       </View>
 
       {sortedHistory.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyIcon}>🟢</Text>
+          <CircleCheckBig size={48} color={Colors.textMuted} style={{ marginBottom: Spacing.lg }} />
           <Text style={styles.emptyTitle}>No outages recorded</Text>
           <Text style={styles.emptySubtitle}>
             Your grid has been stable. SolarGuard will log any outages here.

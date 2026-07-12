@@ -169,7 +169,7 @@ export async function sendPowerCutNotification(
   const routing = getNotificationRouting(true, settings);
 
   const id = await scheduleNotification({
-    title: '⚡ Power Cut Detected',
+    title: 'Power Cut Detected',
     body:
       `Your home is now running on battery backup.\n` +
       `Battery: ${soc}% · Load: ${load}W`,
@@ -221,7 +221,7 @@ export async function sendGridRestoredNotification(
   }
 
   await scheduleNotification({
-    title: '⚡ Grid Restored',
+    title: 'Grid Restored',
     body: `Duration: ${durationStr}\nBattery used: ${socDrop}%`,
     data: { type: 'GRID_RESTORED', durationMs, soc },
     sound: routing.sound as any,
@@ -248,7 +248,7 @@ export async function sendBatteryLowNotification(
     : `${totalMins} minutes`;
 
   await scheduleNotification({
-    title: '⚠️ Battery Low',
+    title: 'Battery Low',
     body: `Battery: ${soc}%\nEstimated backup: ${remainingStr}\nCurrent load: ${loadW}W`,
     data: { type: 'BATTERY_LOW', soc, loadW },
     sound: routing.sound as any,
@@ -264,7 +264,7 @@ export async function sendBatteryCriticalNotification(
   const routing = getNotificationRouting(true, settings);
 
   const id = await scheduleNotification({
-    title: '🚨 Battery Critical',
+    title: 'Battery Critical',
     body: `Battery at ${soc}% — shutdown imminent if grid doesn't restore soon.`,
     data: { type: 'BATTERY_CRITICAL', soc },
     sound: routing.sound as any,
@@ -293,7 +293,7 @@ export async function sendSolarMilestoneNotification(
   const routing = getNotificationRouting(false, settings);
 
   await scheduleNotification({
-    title: '☀️ Great Day!',
+    title: 'Great Day!',
     body: `Today's generation: ${generationKwh.toFixed(1)}kWh`,
     data: { type: 'SOLAR_MILESTONE', generationKwh },
     sound: routing.sound as any,
@@ -312,7 +312,7 @@ export async function sendOverSolarLoadNotification(
   const routing = getNotificationRouting(false, settings);
 
   await scheduleNotification({
-    title: '⚠️ Load Exceeds Solar Output',
+    title: 'Load Exceeds Solar Output',
     body: `House consumption (${loadW}W) is higher than Solar Generation (${pvPowerW}W). Drawing remaining power from battery/grid.`,
     data: { type: 'OVER_SOLAR_LOAD', loadW, pvPowerW },
     sound: routing.sound as any,
@@ -328,7 +328,7 @@ export async function sendBatteryDischargingNotification(
   const routing = getNotificationRouting(false, settings);
 
   await scheduleNotification({
-    title: '🔋 System Discharging Battery',
+    title: 'System Discharging Battery',
     body: `Your battery is currently discharging to power your home load of ${loadW}W.`,
     data: { type: 'BATTERY_DISCHARGE', loadW },
     sound: routing.sound as any,
@@ -343,7 +343,7 @@ export async function sendTestNotification(
   const routing = getNotificationRouting(true, settings);
 
   const id = await scheduleNotification({
-    title: '🚨 Outage Alarm Test',
+    title: 'Outage Alarm Test',
     body: 'SolarGuard alarm sound test is working successfully!',
     data: { type: 'ALARM_TEST' },
     sound: routing.sound as any,

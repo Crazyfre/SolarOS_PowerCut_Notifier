@@ -9,13 +9,21 @@ import {
 import Svg, {
   Circle,
   Line,
-  Defs,
-  LinearGradient as SvgLinearGradient,
-  Stop,
-  Path,
-  Rect,
 } from 'react-native-svg';
 import { Colors, Typography, Spacing } from '../theme';
+import {
+  PlugZap,
+  PowerOff,
+  SunMedium,
+  Cpu,
+  Battery,
+  BatteryFull,
+  BatteryMedium,
+  BatteryLow,
+  BatteryWarning,
+  BatteryCharging,
+  House,
+} from 'lucide-react-native';
 
 interface PowerFlowProps {
   gridOn: boolean;
@@ -102,13 +110,79 @@ export function PowerFlowDiagram({
   const batteryColor = isDischarging ? Colors.amber : isCharging ? Colors.blue : Colors.textMuted;
   const solarColor = pvPower > 0 ? Colors.amberLight : Colors.textMuted;
 
+  // Solar glow/pulse & rotation animation
+  const solarPulse = useRef(new Animated.Value(1)).current;
+  const solarRotate = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (pvPower > 0) {
+      const pulseLoop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(solarPulse, {
+            toValue: 0.4,
+            duration: 1200,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(solarPulse, {
+            toValue: 1,
+            duration: 1200,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulseLoop.start();
+
+      const rotateLoop = Animated.loop(
+        Animated.timing(solarRotate, {
+          toValue: 1,
+          duration: 12000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      );
+      rotateLoop.start();
+
+      return () => {
+        pulseLoop.stop();
+        rotateLoop.stop();
+      };
+    } else {
+      solarPulse.setValue(1);
+      solarRotate.setValue(0);
+    }
+  }, [pvPower]);
+
+  const solarSpin = solarRotate.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  // Battery icon selection based on state and SoC
+  const getBatteryIcon = () => {
+    if (isCharging) {
+      return <BatteryCharging size={20} color={batteryColor} strokeWidth={2} />;
+    }
+    if (batterySoc > 80) {
+      return <BatteryFull size={20} color={batteryColor} strokeWidth={2} />;
+    }
+    if (batterySoc > 30) {
+      return <BatteryMedium size={20} color={batteryColor} strokeWidth={2} />;
+    }
+    if (batterySoc > 10) {
+      return <BatteryLow size={20} color={batteryColor} strokeWidth={2} />;
+    }
+    return <BatteryWarning size={20} color={batteryColor} strokeWidth={2} />;
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.label}>Power Flow</Text>
       <View style={styles.diagram}>
         {/* Fixed coordinate wrapper to align absolute dots and labels with SVG */}
         <View style={styles.canvas}>
-          <Svg width="280" height="230" viewBox="0 0 280 230">
+          <Svg key={gridOn ? 'grid-on' : 'grid-off'} width="280" height="230" viewBox="0 0 280 230">
             {/* Connection lines */}
             {/* Grid ↔ Inverter */}
             <Line
@@ -145,68 +219,59 @@ export function PowerFlowDiagram({
 
             {/* Node: Grid */}
             <Circle cx={nodes.grid.x} cy={nodes.grid.y} r="18" fill={Colors.surfaceElevated} stroke={gridColor} strokeWidth="2" />
-            {/* SVG Plug Icon for Grid */}
-            <Path
-              d={`M ${nodes.grid.x - 4} ${nodes.grid.y - 6} h 8 v 6 a 4 4 0 0 1 -8 0 z M ${nodes.grid.x - 2} ${nodes.grid.y - 10} v 4 M ${nodes.grid.x + 2} ${nodes.grid.y - 10} v 4 M ${nodes.grid.x} ${nodes.grid.y + 4} v 6`}
-              stroke={gridColor}
-              strokeWidth="1.5"
-              fill="none"
-            />
 
             {/* Node: Solar */}
             <Circle cx={nodes.solar.x} cy={nodes.solar.y} r="16" fill={Colors.surfaceElevated} stroke={solarColor} strokeWidth="2" />
-            {/* SVG Sun Icon for Solar */}
-            <Circle cx={nodes.solar.x} cy={nodes.solar.y} r="6" fill="none" stroke={solarColor} strokeWidth="1.5" />
-            <Path
-              d={`M ${nodes.solar.x} ${nodes.solar.y - 10} v 2 M ${nodes.solar.x} ${nodes.solar.y + 8} v 2 M ${nodes.solar.x - 10} ${nodes.solar.y} h 2 M ${nodes.solar.x + 8} ${nodes.solar.y} h 2 M ${nodes.solar.x - 7} ${nodes.solar.y - 7} l 1.5 1.5 M ${nodes.solar.x + 5.5} ${nodes.solar.y + 5.5} l 1.5 1.5 M ${nodes.solar.x - 7} ${nodes.solar.y + 7} l 1.5 -1.5 M ${nodes.solar.x + 5.5} ${nodes.solar.y - 5.5} l 1.5 -1.5`}
-              stroke={solarColor}
-              strokeWidth="1.5"
-            />
 
             {/* Node: Inverter (center hub) */}
             <Circle cx={nodes.inverter.x} cy={nodes.inverter.y} r="20" fill={Colors.surface} stroke={Colors.amber} strokeWidth="2.5" />
-            {/* SVG Inverter Sine/Wave Icon */}
-            <Path
-              d={`M ${nodes.inverter.x - 10} ${nodes.inverter.y} q 5 -6 10 0 t 10 0`}
-              stroke={Colors.amber}
-              strokeWidth="2"
-              fill="none"
-            />
-            <Path
-              d={`M ${nodes.inverter.x - 8} ${nodes.inverter.y + 5} h 16`}
-              stroke={Colors.textMuted}
-              strokeWidth="1.5"
-              strokeDasharray="2,2"
-            />
 
             {/* Node: Battery */}
             <Circle cx={nodes.battery.x} cy={nodes.battery.y} r="16" fill={Colors.surfaceElevated} stroke={batteryColor} strokeWidth="2" />
-            {/* SVG Battery Icon */}
-            <Rect x={nodes.battery.x - 6} y={nodes.battery.y - 8} width="12" height="16" rx="2" fill="none" stroke={batteryColor} strokeWidth="1.5" />
-            <Rect x={nodes.battery.x - 2} y={nodes.battery.y - 11} width="4" height="3" fill={batteryColor} />
-            {/* Dynamic Charge Fill Bar */}
-            {batterySoc > 0 && (
-              <Rect
-                x={nodes.battery.x - 4}
-                y={nodes.battery.y - 6 + (12 - 12 * (batterySoc / 100))}
-                width="8"
-                height={12 * (batterySoc / 100)}
-                fill={batteryColor}
-                opacity="0.8"
-              />
-            )}
 
             {/* Node: House */}
             <Circle cx={nodes.house.x} cy={nodes.house.y} r="18" fill={Colors.surfaceElevated} stroke={Colors.amberLight} strokeWidth="2" />
-            {/* SVG House Icon */}
-            <Path
-              d={`M ${nodes.house.x - 8} ${nodes.house.y + 6} v -7 l 8 -6 l 8 6 v 7 z`}
-              stroke={Colors.amberLight}
-              strokeWidth="1.5"
-              fill="none"
-            />
-            <Rect x={nodes.house.x - 2} y={nodes.house.y + 1} width="4" height="5" fill="none" stroke={Colors.amberLight} strokeWidth="1" />
           </Svg>
+
+          {/* Absolute overlay Lucide Icons */}
+          {/* Grid Icon */}
+          <View style={[styles.iconOverlay, { left: nodes.grid.x - 10, top: nodes.grid.y - 10 }]}>
+            {gridOn ? (
+              <PlugZap size={20} color={gridColor} strokeWidth={2} />
+            ) : (
+              <PowerOff size={20} color={gridColor} strokeWidth={2} />
+            )}
+          </View>
+
+          {/* Solar Icon with pulse/glow/rotation */}
+          <Animated.View style={[
+            styles.iconOverlay, 
+            { 
+              left: nodes.solar.x - 10, 
+              top: nodes.solar.y - 10, 
+              opacity: solarPulse,
+              transform: [{ rotate: solarSpin }]
+            }
+          ]}>
+            <View>
+              <SunMedium size={20} color={solarColor} strokeWidth={2} />
+            </View>
+          </Animated.View>
+
+          {/* Inverter Icon */}
+          <View style={[styles.iconOverlay, { left: nodes.inverter.x - 12, top: nodes.inverter.y - 12 }]}>
+            <Cpu size={24} color={Colors.amber} strokeWidth={2} />
+          </View>
+
+          {/* Battery Icon */}
+          <View style={[styles.iconOverlay, { left: nodes.battery.x - 10, top: nodes.battery.y - 10 }]}>
+            {getBatteryIcon()}
+          </View>
+
+          {/* House Icon */}
+          <View style={[styles.iconOverlay, { left: nodes.house.x - 10, top: nodes.house.y - 10 }]}>
+            <House size={20} color={Colors.amberLight} strokeWidth={2} />
+          </View>
 
           {/* Overlay text labels below/above nodes */}
           <View style={[styles.nodeLabel, { left: nodes.grid.x - 30, top: nodes.grid.y + 20, width: 60 }]}>
@@ -221,7 +286,7 @@ export function PowerFlowDiagram({
               )
             )}
           </View>
-          <View style={[styles.nodeLabel, { left: nodes.solar.x - 30, top: nodes.solar.y - 28, width: 60 }]}>
+          <View style={[styles.nodeLabel, { left: nodes.solar.x - 30, top: nodes.solar.y - 42, width: 60 }]}>
             <Text style={styles.nodeLabelTitle}>Solar</Text>
             {pvPower > 0 && <Text style={styles.subText}>{formatPower(pvPower)}</Text>}
           </View>
@@ -338,5 +403,10 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     left: -4,
     top: -4,
+  },
+  iconOverlay: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

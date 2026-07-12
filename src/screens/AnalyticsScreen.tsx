@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../theme';
 import { useApp } from '../context/AppContext';
 import Svg, { Rect, G, Line, Circle } from 'react-native-svg';
+import { SunMedium, House, ArrowUpRight, ArrowDownLeft } from 'lucide-react-native';
 
 export function AnalyticsScreen() {
   const { settings, telemetry } = useApp();
@@ -48,12 +49,12 @@ export function AnalyticsScreen() {
           <View style={[styles.card, isAmoled && styles.cardAmoled]}>
             <View style={styles.metricRow}>
               <View style={styles.metricItem}>
-                <Text style={styles.metricIcon}>☀️</Text>
+                <SunMedium size={24} color={Colors.amberLight} style={{ marginBottom: 4 }} />
                 <Text style={styles.metricLabel}>Solar Generated</Text>
                 <Text style={[styles.metricValue, { color: Colors.amberLight }]}>{formatKwh(dailySolar)}</Text>
               </View>
               <View style={styles.metricItem}>
-                <Text style={styles.metricIcon}>🏠</Text>
+                <House size={24} color={Colors.amber} style={{ marginBottom: 4 }} />
                 <Text style={styles.metricLabel}>House Used</Text>
                 <Text style={[styles.metricValue, { color: Colors.amber }]}>{formatKwh(dailyHouse)}</Text>
               </View>
@@ -63,12 +64,12 @@ export function AnalyticsScreen() {
 
             <View style={styles.metricRow}>
               <View style={styles.metricItem}>
-                <Text style={styles.metricIcon}>▲</Text>
+                <ArrowUpRight size={24} color={Colors.success} style={{ marginBottom: 4 }} />
                 <Text style={styles.metricLabel}>Exported to Grid</Text>
                 <Text style={[styles.metricValue, { color: Colors.success }]}>{formatKwh(dailyExport)}</Text>
               </View>
               <View style={styles.metricItem}>
-                <Text style={styles.metricIcon}>▼</Text>
+                <ArrowDownLeft size={24} color={Colors.danger} style={{ marginBottom: 4 }} />
                 <Text style={styles.metricLabel}>Imported from Grid</Text>
                 <Text style={[styles.metricValue, { color: Colors.danger }]}>{formatKwh(dailyImport)}</Text>
               </View>

@@ -6,7 +6,7 @@ interface StatusCardProps {
   title: string;
   value: string;
   subtitle?: string;
-  icon: string;
+  icon: React.ReactNode;
   accentColor?: string;
   glowColor?: string;
   large?: boolean;
@@ -35,7 +35,7 @@ export function StatusCard({
       {!amoled && <View style={[styles.glowLayer, { backgroundColor: glow }]} />}
 
       <View style={styles.iconContainer}>
-        <Text style={styles.icon}>{icon}</Text>
+        {icon}
       </View>
 
       <Text style={styles.title}>{title}</Text>

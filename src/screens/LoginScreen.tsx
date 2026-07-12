@@ -18,6 +18,15 @@ import { fetchStations } from '../api/solar';
 import { useApp } from '../context/AppContext';
 import { requestNotificationPermissions } from '../services/notifications';
 import { registerBackgroundFetch } from '../services/backgroundFetch';
+import {
+  SunMedium,
+  TriangleAlert,
+  Zap,
+  Lock,
+  Battery,
+  ChartColumn,
+  Bell,
+} from 'lucide-react-native';
 
 interface Station {
   id: string;
@@ -172,7 +181,7 @@ export function LoginScreen() {
           {/* Logo / Header */}
           <View style={styles.heroSection}>
             <View style={styles.logoContainer}>
-              <Text style={styles.logoIcon}>☀️</Text>
+              <SunMedium size={72} color={Colors.amber} />
               <View style={styles.logoGlow} />
             </View>
             <Text style={styles.appName}>SolarGuard</Text>
@@ -224,8 +233,9 @@ export function LoginScreen() {
 
             {/* Error */}
             {error ? (
-              <View style={styles.errorBox}>
-                <Text style={styles.errorText}>⚠️ {error}</Text>
+              <View style={[styles.errorBox, { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }]}>
+                <TriangleAlert size={18} color={Colors.dangerLight} />
+                <Text style={[styles.errorText, { flex: 1 }]}>{error}</Text>
               </View>
             ) : null}
 
@@ -246,25 +256,32 @@ export function LoginScreen() {
                   </Text>
                 </View>
               ) : (
-                <Text style={styles.buttonText}>Connect ⚡</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, justifyContent: 'center' }}>
+                  <Text style={styles.buttonText}>Connect</Text>
+                  <Zap size={16} color={Colors.textInverse} />
+                </View>
               )}
             </TouchableOpacity>
 
-            <Text style={styles.securityNote}>
-              🔒 Your password is SHA-256 hashed before transmission and never stored.
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, marginTop: Spacing.md }}>
+              <Lock size={12} color={Colors.textMuted} />
+              <Text style={[styles.securityNote, { marginTop: 0 }]}>
+                Your password is SHA-256 hashed before transmission and never stored.
+              </Text>
+            </View>
           </View>
 
           {/* Feature pills */}
           <View style={styles.features}>
             {[
-              '⚡ Outage Alerts',
-              '🔋 Battery Monitor',
-              '📊 Usage Insights',
-              '🔔 Instant Push',
+              { text: 'Outage Alerts', icon: <TriangleAlert size={14} color={Colors.amberLight} /> },
+              { text: 'Battery Monitor', icon: <Battery size={14} color={Colors.amberLight} /> },
+              { text: 'Usage Insights', icon: <ChartColumn size={14} color={Colors.amberLight} /> },
+              { text: 'Instant Push', icon: <Bell size={14} color={Colors.amberLight} /> },
             ].map((f) => (
-              <View key={f} style={styles.featurePill}>
-                <Text style={styles.featurePillText}>{f}</Text>
+              <View key={f.text} style={[styles.featurePill, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
+                {f.icon}
+                <Text style={styles.featurePillText}>{f.text}</Text>
               </View>
             ))}
           </View>

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,8 @@ import {
   StatusBar,
   ActivityIndicator,
   Linking,
+  Animated,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../theme';
@@ -21,6 +23,26 @@ import { useNavigation } from '@react-navigation/native';
 import Svg, { Path } from 'react-native-svg';
 import { Store } from '../storage/secureStore';
 import { isRunningInExpoGo } from '../services/notifications';
+import {
+  TriangleAlert,
+  Rocket,
+  Smartphone,
+  Radio,
+  PlugZap,
+  CircleOff,
+  BatteryCharging,
+  BatteryMedium,
+  BatteryLow,
+  BatteryWarning,
+  BatteryFull,
+  Battery,
+  PanelTop,
+  House,
+  MoonStar,
+  SunMedium,
+  HeartPulse,
+  CircleCheckBig,
+} from 'lucide-react-native';
 
 
 function formatTime(ts: number | null): string {
@@ -35,8 +57,142 @@ export function DashboardScreen() {
   const [outageStart, setOutageStart] = useState<number | null>(null);
   const [timeAgoStr, setTimeAgoStr] = useState('just now');
 
+  const isGridOn = telemetry?.gridRelayStatus === 'on';
+  const isOutage = telemetry?.gridRelayStatus === 'off';
+  const batteryIsCharging = telemetry?.batteryStatus === 'CHARGE';
+  const isAmoled = settings?.amoledTheme ?? false;
+
+  // Animated values for micro-animations
+  const solarRotate = useRef(new Animated.Value(0)).current;
+  const solarPulse = useRef(new Animated.Value(1)).current;
+  const gridPulse = useRef(new Animated.Value(1)).current;
+  const bannerPulse = useRef(new Animated.Value(1)).current;
+  const outageFlash = useRef(new Animated.Value(0)).current;
+
+  // Banner pulse animation
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(bannerPulse, {
+          toValue: 0.6,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(bannerPulse, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  // Solar rotation and pulse animation
+  useEffect(() => {
+    const hasSolar = telemetry?.pvPower && telemetry.pvPower > 0;
+    if (hasSolar) {
+      const rotateAnim = Animated.loop(
+        Animated.timing(solarRotate, {
+          toValue: 1,
+          duration: 12000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      );
+      rotateAnim.start();
+
+      const pulseAnim = Animated.loop(
+        Animated.sequence([
+          Animated.timing(solarPulse, {
+            toValue: 0.4,
+            duration: 1200,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(solarPulse, {
+            toValue: 1,
+            duration: 1200,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulseAnim.start();
+
+      return () => {
+        rotateAnim.stop();
+        pulseAnim.stop();
+      };
+    } else {
+      solarRotate.setValue(0);
+      solarPulse.setValue(1);
+    }
+  }, [telemetry?.pvPower]);
+
+  const solarSpin = solarRotate.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  // Grid connected pulse animation
+  useEffect(() => {
+    if (isGridOn) {
+      const pulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(gridPulse, {
+            toValue: 1.15,
+            duration: 600,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(gridPulse, {
+            toValue: 1,
+            duration: 600,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.delay(3000),
+        ])
+      );
+      pulse.start();
+      return () => pulse.stop();
+    } else {
+      gridPulse.setValue(1);
+    }
+  }, [isGridOn]);
+
+  // Outage red flash animation
+  useEffect(() => {
+    if (isOutage) {
+      Animated.sequence([
+        Animated.timing(outageFlash, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+        Animated.timing(outageFlash, {
+          toValue: 0,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+        Animated.timing(outageFlash, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+        Animated.timing(outageFlash, {
+          toValue: 0,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [isOutage]);
+
   // Load persisted outage start time
-  React.useEffect(() => {
+  useEffect(() => {
     Store.getOutageStartTime().then(setOutageStart);
   }, [telemetry]);
 
@@ -67,11 +223,6 @@ export function DashboardScreen() {
     const interval = setInterval(updateText, 10000);
     return () => clearInterval(interval);
   }, [lastFetchTime]);
-
-  const isGridOn = telemetry?.gridRelayStatus === 'on';
-  const isOutage = telemetry?.gridRelayStatus === 'off';
-  const batteryIsCharging = telemetry?.batteryStatus === 'CHARGE';
-  const isAmoled = settings?.amoledTheme ?? false;
 
   const batteryCapacity = settings?.batteryCapacity ?? 5.12;
 
@@ -164,22 +315,24 @@ export function DashboardScreen() {
       >
         {/* Error banner */}
         {fetchError ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>⚠️ {fetchError}</Text>
+          <View style={[styles.errorBanner, { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }]}>
+            <TriangleAlert size={20} color={Colors.dangerLight} />
+            <Text style={styles.errorText}>{fetchError}</Text>
           </View>
         ) : null}
 
         {/* Update Available Banner */}
         {updateInfo?.updateAvailable && (
           <TouchableOpacity
-            style={styles.updateBanner}
+            style={[styles.updateBanner, { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }]}
             onPress={() => Linking.openURL(updateInfo.releaseUrl).catch(() => {})}
             activeOpacity={0.8}
             testID="update-banner"
           >
             <View style={styles.updateBannerGlow} />
-            <Text style={styles.updateBannerText}>
-              🚀 A new update ({updateInfo.latestVersion}) is available!{' '}
+            <Rocket size={20} color={Colors.blueLight} />
+            <Text style={[styles.updateBannerText, { flex: 1 }]}>
+              A new update ({updateInfo.latestVersion}) is available!{' '}
               <Text style={styles.updateBannerLink}>Tap to download.</Text>
             </Text>
           </TouchableOpacity>
@@ -187,9 +340,10 @@ export function DashboardScreen() {
 
         {/* Expo Go notice — notifications require a dev build */}
         {isRunningInExpoGo() && (
-          <View style={styles.expoGoBanner}>
-            <Text style={styles.expoGoBannerText}>
-              📱 Running in Expo Go — push notifications disabled.{' '}
+          <View style={[styles.expoGoBanner, { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }]}>
+            <Smartphone size={20} color={Colors.purple} />
+            <Text style={[styles.expoGoBannerText, { flex: 1 }]}>
+              Running in Expo Go — push notifications disabled.{' '}
               <Text style={styles.expoGoBannerLink}>Use a dev build for full functionality.</Text>
             </Text>
           </View>
@@ -198,7 +352,7 @@ export function DashboardScreen() {
         {/* No data yet */}
         {!telemetry && !isFetching && !fetchError ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>📡</Text>
+            <Radio size={48} color={Colors.textMuted} style={{ marginBottom: Spacing.base }} />
             <Text style={styles.emptyText}>Fetching inverter data…</Text>
           </View>
         ) : null}
@@ -214,8 +368,12 @@ export function DashboardScreen() {
                 return (
                   <View style={[styles.gridBanner, { borderColor: Colors.success + '44' }, isAmoled && styles.bannerAmoled]}>
                     <View style={[styles.gridBannerGlow, { backgroundColor: Colors.successGlow }]} />
-                    <Text style={[styles.gridBannerDot, { color: Colors.success }]}>🟢</Text>
-                    <View>
+                    <Animated.View style={{ transform: [{ scale: gridPulse }] }}>
+                      <View>
+                        <PlugZap size={24} color={Colors.success} />
+                      </View>
+                    </Animated.View>
+                    <View style={{ marginLeft: Spacing.xs }}>
                       <Text style={styles.gridBannerTitle}>Grid Connected</Text>
                       <Text style={styles.gridBannerSub}>
                         {isExporting ? `Exporting ${powerStr}` : telemetry.wirePower > 0 ? `Importing ${powerStr}` : 'Standby'}
@@ -231,8 +389,13 @@ export function DashboardScreen() {
                   return (
                     <View style={[styles.gridBanner, { borderColor: Colors.danger + '44' }, isAmoled && styles.bannerAmoled]}>
                       <View style={[styles.gridBannerGlow, { backgroundColor: Colors.dangerGlow }]} />
-                      <Text style={[styles.gridBannerDot, { color: Colors.danger }]}>🔴</Text>
-                      <View>
+                      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.danger, opacity: outageFlash }]} pointerEvents="none" />
+                      <Animated.View style={{ transform: [{ scale: bannerPulse }] }}>
+                        <View>
+                          <BatteryWarning size={24} color={Colors.danger} />
+                        </View>
+                      </Animated.View>
+                      <View style={{ marginLeft: Spacing.xs }}>
                         <Text style={styles.gridBannerTitle}>Battery Critical</Text>
                         <Text style={styles.gridBannerSub}>
                           {telemetry.batterySoc}% SOC · Estimated remaining {getBackupTimeText()}
@@ -245,8 +408,15 @@ export function DashboardScreen() {
                   return (
                     <View style={[styles.gridBanner, { borderColor: Colors.amber + '44' }, isAmoled && styles.bannerAmoled]}>
                       <View style={[styles.gridBannerGlow, { backgroundColor: Colors.warningGlow }]} />
-                      <Text style={[styles.gridBannerDot, { color: Colors.amber }]}>🟡</Text>
+                      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.danger, opacity: outageFlash }]} pointerEvents="none" />
                       <View>
+                        {batteryIsCharging ? (
+                          <BatteryCharging size={24} color={Colors.amber} />
+                        ) : (
+                          <BatteryMedium size={24} color={Colors.amber} />
+                        )}
+                      </View>
+                      <View style={{ marginLeft: Spacing.xs }}>
                         <Text style={styles.gridBannerTitle}>Running on Battery</Text>
                         <Text style={styles.gridBannerSub}>
                           Remaining {getBackupTimeText()}
@@ -285,7 +455,7 @@ export function DashboardScreen() {
                         ? 'Power cut active'
                         : `Flow: ${formatPower(Math.abs(telemetry.wirePower))} · Today: ↓${(telemetry.buyValue ?? 0).toFixed(1)} ↑${(telemetry.gridValue ?? 0).toFixed(1)} kWh`
                     }
-                    icon={isGridOn ? '🔌' : '🚫'}
+                    icon={isGridOn ? <PlugZap size={28} color={Colors.success} /> : <CircleOff size={28} color={Colors.danger} />}
                     accentColor={isGridOn ? Colors.success : Colors.danger}
                     amoled={isAmoled}
                   />
@@ -295,7 +465,7 @@ export function DashboardScreen() {
                     title="House Load"
                     value={formatPower(telemetry.usePower ?? 0)}
                     subtitle={`Today: ${(telemetry.useValue ?? 0).toFixed(1)} kWh`}
-                    icon="🏠"
+                    icon={<House size={28} color={Colors.amber} />}
                     accentColor={Colors.amber}
                     amoled={isAmoled}
                   />
@@ -320,13 +490,20 @@ export function DashboardScreen() {
                         ? `-${formatPower(Math.abs(telemetry.batteryPower ?? 0))} · Today: ${(telemetry.dischargeValue ?? 0).toFixed(1)} kWh`
                         : `0 W · Today: ${(telemetry.chargeValue ?? 0).toFixed(1)} kWh`
                     }
-                    icon={
-                      telemetry.batteryStatus === 'CHARGE'
-                        ? '⚡'
-                        : telemetry.batteryStatus === 'DISCHARGE'
-                        ? '🔋'
-                        : '⏸️'
-                    }
+                    icon={(() => {
+                      const soc = telemetry.batterySoc ?? 100;
+                      if (telemetry.batteryStatus === 'CHARGE') return <BatteryCharging size={28} color={Colors.blue} />;
+                      if (telemetry.batteryStatus === 'DISCHARGE') {
+                        if (soc > 80) return <BatteryFull size={28} color={Colors.amber} />;
+                        if (soc > 30) return <BatteryMedium size={28} color={Colors.amber} />;
+                        if (soc > 10) return <BatteryLow size={28} color={Colors.amber} />;
+                        return <BatteryWarning size={28} color={Colors.amber} />;
+                      }
+                      if (soc > 80) return <BatteryFull size={28} color={Colors.textMuted} />;
+                      if (soc > 30) return <BatteryMedium size={28} color={Colors.textMuted} />;
+                      if (soc > 10) return <BatteryLow size={28} color={Colors.textMuted} />;
+                      return <BatteryWarning size={28} color={Colors.textMuted} />;
+                    })()}
                     accentColor={
                       batteryIsCharging ? Colors.blue : Colors.amber
                     }
@@ -338,7 +515,13 @@ export function DashboardScreen() {
                     title="Solar PV"
                     value={formatPower(telemetry.pvPower ?? 0)}
                     subtitle={`Today: ${(telemetry.generationValue ?? 0).toFixed(1)} kWh`}
-                    icon="☀️"
+                    icon={
+                      <Animated.View style={{ width: 28, height: 28, justifyContent: 'center', alignItems: 'center', opacity: solarPulse, transform: [{ rotate: solarSpin }] }}>
+                        <View style={{ width: 28, height: 28, justifyContent: 'center', alignItems: 'center' }}>
+                          <SunMedium size={28} color={Colors.amberLight} />
+                        </View>
+                      </Animated.View>
+                    }
                     accentColor={Colors.amberLight}
                     amoled={isAmoled}
                   />
@@ -365,24 +548,56 @@ export function DashboardScreen() {
               <Text style={styles.sectionTitle}>System Health</Text>
               <View style={[styles.healthCard, isAmoled && styles.cardAmoled]}>
                 <View style={styles.healthRow}>
-                  <Text style={styles.healthLabel}>Battery</Text>
-                  <Text style={[styles.healthValue, { color: getBatteryHealth() === 'Critical' ? Colors.danger : Colors.success }]}>
-                    {getBatteryHealth()} ({telemetry.batterySoc}%)
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+                    <HeartPulse size={18} color={Colors.textSecondary} />
+                    <Text style={styles.healthLabel}>Battery</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }}>
+                    {getBatteryHealth() === 'Critical' ? (
+                      <TriangleAlert size={16} color={Colors.danger} />
+                    ) : (
+                      <CircleCheckBig size={16} color={Colors.success} />
+                    )}
+                    <Text style={[styles.healthValue, { color: getBatteryHealth() === 'Critical' ? Colors.danger : Colors.success }]}>
+                      {getBatteryHealth()} ({telemetry.batterySoc}%)
+                    </Text>
+                  </View>
                 </View>
                 <View style={styles.separator} />
                 <View style={styles.healthRow}>
-                  <Text style={styles.healthLabel}>Grid Connection</Text>
-                  <Text style={[styles.healthValue, { color: isGridOn ? Colors.success : Colors.danger }]}>
-                    {getGridHealth()}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+                    <PlugZap size={18} color={Colors.textSecondary} />
+                    <Text style={styles.healthLabel}>Grid Connection</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }}>
+                    {isGridOn ? (
+                      <CircleCheckBig size={16} color={Colors.success} />
+                    ) : (
+                      <CircleOff size={16} color={Colors.danger} />
+                    )}
+                    <Text style={[styles.healthValue, { color: isGridOn ? Colors.success : Colors.danger }]}>
+                      {getGridHealth()}
+                    </Text>
+                  </View>
                 </View>
                 <View style={styles.separator} />
                 <View style={styles.healthRow}>
-                  <Text style={styles.healthLabel}>Solar PV Production</Text>
-                  <Text style={[styles.healthValue, { color: telemetry.pvPower && telemetry.pvPower > 0 ? Colors.success : Colors.textMuted }]}>
-                    {getSolarHealth()}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }}>
+                    <SunMedium size={18} color={Colors.textSecondary} />
+                    <Text style={styles.healthLabel}>Solar PV Production</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }}>
+                    {telemetry.pvPower && telemetry.pvPower > 1000 ? (
+                      <CircleCheckBig size={16} color={Colors.success} />
+                    ) : telemetry.pvPower && telemetry.pvPower > 0 ? (
+                      <TriangleAlert size={16} color={Colors.amber} />
+                    ) : (
+                      <CircleOff size={16} color={Colors.textMuted} />
+                    )}
+                    <Text style={[styles.healthValue, { color: telemetry.pvPower && telemetry.pvPower > 0 ? Colors.success : Colors.textMuted }]}>
+                      {getSolarHealth()}
+                    </Text>
+                  </View>
                 </View>
               </View>
             </View>

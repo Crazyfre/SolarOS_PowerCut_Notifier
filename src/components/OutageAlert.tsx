@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { Colors, BorderRadius, Typography, Spacing, Shadows } from '../theme';
 import { TelemetryData } from '../types/telemetry';
+import { TriangleAlert } from 'lucide-react-native';
 
 interface OutageAlertProps {
   telemetry: TelemetryData;
@@ -64,13 +65,13 @@ export function OutageAlert({ telemetry, outageStartTime }: OutageAlertProps) {
           toValue: 1,
           duration: 1000,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: false,
+          useNativeDriver: true,
         }),
         Animated.timing(glowAnim, {
           toValue: 0,
           duration: 1000,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: false,
+          useNativeDriver: true,
         }),
       ])
     );
@@ -100,33 +101,32 @@ export function OutageAlert({ telemetry, outageStartTime }: OutageAlertProps) {
     return () => loop.stop();
   }, []);
 
-  const borderOpacity = glowAnim.interpolate({
+  const glowOpacity = glowAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.4, 1],
+    outputRange: [0.3, 0.7],
   });
 
   return (
-    <Animated.View
+    <View
       style={[
         styles.container,
         {
-          borderColor: glowAnim.interpolate({
-            inputRange: [0, 1],
-            outputRange: [Colors.danger + '66', Colors.danger],
-          }),
+          borderColor: Colors.danger + '77',
         },
       ]}
     >
       {/* Background glow */}
-      <View style={styles.glowBg} />
+      <Animated.View style={[styles.glowBg, { opacity: glowOpacity }]} />
 
       {/* Header */}
       <View style={styles.header}>
-        <Animated.Text
-          style={[styles.alertIcon, { transform: [{ scale: pulseAnim }] }]}
+        <Animated.View
+          style={{ transform: [{ scale: pulseAnim }] }}
         >
-          ⚡
-        </Animated.Text>
+          <View>
+            <TriangleAlert size={40} color={Colors.danger} />
+          </View>
+        </Animated.View>
         <View>
           <Text style={styles.alertTitle}>POWER CUT</Text>
           <Text style={styles.alertSubtitle}>Running on Battery Backup</Text>
@@ -161,13 +161,14 @@ export function OutageAlert({ telemetry, outageStartTime }: OutageAlertProps) {
 
       {/* Warning for low battery */}
       {soc <= 20 && (
-        <View style={styles.lowBatteryWarning}>
+        <View style={[styles.lowBatteryWarning, { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs }]}>
+          <TriangleAlert size={16} color={Colors.amberLight} />
           <Text style={styles.lowBatteryText}>
-            ⚠️ Battery low — charge soon or reduce load
+            Battery low — charge soon or reduce load
           </Text>
         </View>
       )}
-    </Animated.View>
+    </View>
   );
 }
 
