@@ -4,6 +4,8 @@ import { Store } from '../storage/secureStore';
 import { fetchTelemetry } from '../api/solar';
 import { detectAndAlert } from './stateDetector';
 import { SettingsStore } from '../storage/settingsStore';
+import { Platform } from 'react-native';
+import OutageAlarm from '../../modules/outage-alarm';
 
 export const BACKGROUND_FETCH_TASK = 'SOLARGUARD_BACKGROUND_FETCH';
 
@@ -66,6 +68,13 @@ export async function unregisterBackgroundFetch(): Promise<void> {
     );
     if (isRegistered) {
       await BackgroundFetch.unregisterTaskAsync(BACKGROUND_FETCH_TASK);
+    }
+    if (Platform.OS === 'android') {
+      try {
+        OutageAlarm.stopAlarm();
+      } catch (err) {
+        console.warn('Failed to stop native alarm on unregistration:', err);
+      }
     }
   } catch (error) {
     console.warn('[BackgroundFetch] Unregistration failed:', error);

@@ -3,6 +3,7 @@ import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 import { TelemetryData, AppSettings } from '../types/telemetry';
 import { DEFAULT_SETTINGS } from '../storage/settingsStore';
+import OutageAlarm from '../../modules/outage-alarm';
 
 export const ALARM_SOUND_OPTIONS = [
   { id: 'alarm' as const, name: 'Classic Siren', file: 'alarm.wav' },
@@ -178,6 +179,15 @@ export async function sendPowerCutNotification(
     ...(Platform.OS === 'android' && { channelId: routing.channelId }),
   });
 
+  if (Platform.OS === 'android' && settings.useAlarmSound) {
+    try {
+      const soundId = settings.alarmSoundName ?? 'alarm';
+      OutageAlarm.triggerAlarm(soundId, settings.alarmDurationSeconds);
+    } catch (err) {
+      console.warn('Failed to trigger native alarm:', err);
+    }
+  }
+
   if (id && settings.alarmDurationSeconds > 0) {
     setTimeout(async () => {
       try {
@@ -200,6 +210,14 @@ export async function sendGridRestoredNotification(
   const mins = minutes % 60;
   const durationStr = hours > 0 ? `${hours}h ${mins}m` : `${minutes}m`;
   const routing = getNotificationRouting(false, settings);
+
+  if (Platform.OS === 'android') {
+    try {
+      OutageAlarm.stopAlarm();
+    } catch (err) {
+      console.warn('Failed to stop native alarm:', err);
+    }
+  }
 
   await scheduleNotification({
     title: '⚡ Grid Restored',
@@ -252,6 +270,15 @@ export async function sendBatteryCriticalNotification(
     color: '#EF4444',
     ...(Platform.OS === 'android' && { channelId: routing.channelId }),
   });
+
+  if (Platform.OS === 'android' && settings.useAlarmSound) {
+    try {
+      const soundId = settings.alarmSoundName ?? 'alarm';
+      OutageAlarm.triggerAlarm(soundId, settings.alarmDurationSeconds);
+    } catch (err) {
+      console.warn('Failed to trigger native alarm:', err);
+    }
+  }
 
   if (id && settings.alarmDurationSeconds > 0) {
     setTimeout(async () => {
@@ -328,6 +355,15 @@ export async function sendTestNotification(
     color: '#EF4444',
     ...(Platform.OS === 'android' && { channelId: routing.channelId }),
   });
+
+  if (Platform.OS === 'android' && settings.useAlarmSound) {
+    try {
+      const soundId = settings.alarmSoundName ?? 'alarm';
+      OutageAlarm.triggerAlarm(soundId, settings.alarmDurationSeconds);
+    } catch (err) {
+      console.warn('Failed to trigger native alarm:', err);
+    }
+  }
 
   if (id && settings.alarmDurationSeconds > 0) {
     setTimeout(async () => {
