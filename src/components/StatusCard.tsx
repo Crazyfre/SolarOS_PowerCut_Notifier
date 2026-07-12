@@ -27,15 +27,20 @@ export function StatusCard({
 
   return (
     <View style={[
-      styles.card, 
+      styles.card,
       { borderColor: accentColor + '33' },
       amoled && { backgroundColor: '#000000', borderColor: '#222' }
     ]}>
-      {/* Glow layer */}
-      {!amoled && <View style={[styles.glowLayer, { backgroundColor: glow }]} />}
+      {/* Glow layer — wrapped in View to prevent Fabric in-place mutation crash */}
+      <View>
+        {!amoled && <View style={[styles.glowLayer, { backgroundColor: glow }]} />}
+      </View>
 
+      {/* Icon — wrapped in View so conditional icon type changes don't crash Fabric */}
       <View style={styles.iconContainer}>
-        {icon}
+        <View>
+          {icon}
+        </View>
       </View>
 
       <Text style={styles.title}>{title}</Text>

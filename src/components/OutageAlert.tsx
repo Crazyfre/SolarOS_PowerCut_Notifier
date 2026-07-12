@@ -162,7 +162,7 @@ export function OutageAlert({ telemetry, outageStartTime }: OutageAlertProps) {
       {/* Warning for low battery */}
       {soc <= 20 && (
         <View style={[styles.lowBatteryWarning, { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs }]}>
-          <TriangleAlert size={16} color={Colors.amberLight} />
+          <View><TriangleAlert size={16} color={Colors.amberLight} /></View>
           <Text style={styles.lowBatteryText}>
             Battery low — charge soon or reduce load
           </Text>
