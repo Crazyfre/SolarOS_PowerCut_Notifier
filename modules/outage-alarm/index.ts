@@ -10,6 +10,7 @@ interface OutageAlarmModuleType {
   triggerAlarm(options: OutageAlarmOptions): void;
   stopAlarm(): void;
   isAlarmPlaying(): boolean;
+  isIgnoringBatteryOptimizations(): boolean;
 }
 
 const OutageAlarm = requireNativeModule<OutageAlarmModuleType>('OutageAlarm');

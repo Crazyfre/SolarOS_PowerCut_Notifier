@@ -10,6 +10,7 @@ import {
   Alert,
   Platform,
   Linking,
+  AppState,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +22,7 @@ import { unregisterBackgroundFetch } from '../services/backgroundFetch';
 import { StationService, SolarStation } from '../services/stationService';
 import { DevOverridesStore } from '../storage/devOverridesStore';
 import { sendTestNotification, ALARM_SOUND_OPTIONS, requestNotificationPermissions } from '../services/notifications';
+import OutageAlarm from '../../modules/outage-alarm';
 
 type RootStackParamList = {
   Dashboard: undefined;
@@ -36,6 +38,7 @@ export function SettingsScreen() {
 
   // Permissions State
   const [hasNotificationPermission, setHasNotificationPermission] = useState<boolean | null>(null);
+  const [isBatteryOptimizationBypassed, setIsBatteryOptimizationBypassed] = useState<boolean | null>(null);
 
   // Developer overrides state
   const [devOverridesEnabled, setDevOverridesEnabled] = useState(false);
@@ -112,7 +115,43 @@ export function SettingsScreen() {
       } catch (err) {
         console.warn('Failed to check notification permissions:', err);
       }
+
+      // Check battery optimization status
+      try {
+        if (Platform.OS === 'android') {
+          const ignored = OutageAlarm.isIgnoringBatteryOptimizations();
+          setIsBatteryOptimizationBypassed(ignored);
+        } else {
+          setIsBatteryOptimizationBypassed(true);
+        }
+      } catch (err) {
+        console.warn('Failed to check battery optimization status:', err);
+      }
     })();
+  }, []);
+
+  // Re-check permissions and battery optimization status when app returns from background
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        // Re-check notification permission
+        Notifications.getPermissionsAsync().then(({ status }) => {
+          setHasNotificationPermission(status === 'granted');
+        }).catch(() => {});
+
+        // Re-check battery optimization
+        if (Platform.OS === 'android') {
+          try {
+            const ignored = OutageAlarm.isIgnoringBatteryOptimizations();
+            setIsBatteryOptimizationBypassed(ignored);
+          } catch (err) {}
+        }
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
   }, []);
 
 
@@ -452,34 +491,44 @@ export function SettingsScreen() {
             <View style={styles.row}>
               <View style={styles.rowInfo}>
                 <Text style={styles.rowTitle}>Background Battery Optimization</Text>
-                <Text style={styles.rowSub}>Prevent Android from killing SolarGuard background monitoring</Text>
+                <Text style={styles.rowSub}>
+                  {isBatteryOptimizationBypassed === true
+                    ? 'Optimizations are disabled (Unrestricted)'
+                    : 'Prevent Android from killing SolarGuard background monitoring'}
+                </Text>
               </View>
-              <TouchableOpacity
-                style={styles.configureBtn}
-                onPress={() => {
-                  Alert.alert(
-                    'Background Performance',
-                    'To ensure the app can run forever in the background and trigger sirens instantly, you must configure your device battery settings to "Unrestricted" or "Not Optimized" for SolarGuard.',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      {
-                        text: 'Configure ⚙️',
-                        onPress: () => {
-                          if (Platform.OS === 'android') {
-                            Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS').catch(() => {
+              {isBatteryOptimizationBypassed === true ? (
+                <View style={styles.grantedBadge}>
+                  <Text style={styles.grantedBadgeText}>✓ Configured</Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.configureBtn}
+                  onPress={() => {
+                    Alert.alert(
+                      'Background Performance',
+                      'To ensure the app can run forever in the background and trigger sirens instantly, you must configure your device battery settings to "Unrestricted" or "Not Optimized" for SolarGuard.',
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Configure ⚙️',
+                          onPress: () => {
+                            if (Platform.OS === 'android') {
+                              Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS').catch(() => {
+                                Linking.openSettings().catch(() => {});
+                              });
+                            } else {
                               Linking.openSettings().catch(() => {});
-                            });
-                          } else {
-                            Linking.openSettings().catch(() => {});
+                            }
                           }
                         }
-                      }
-                    ]
-                  );
-                }}
-              >
-                <Text style={styles.configureBtnText}>Configure</Text>
-              </TouchableOpacity>
+                      ]
+                    );
+                  }}
+                >
+                  <Text style={styles.configureBtnText}>Configure</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
