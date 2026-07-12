@@ -208,8 +208,15 @@ export async function sendGridRestoredNotification(
   if (Platform.OS === 'android') {
     try {
       OutageAlarm.stopAlarm();
+      if (settings.useAlarmSound) {
+        OutageAlarm.triggerAlarm({
+          reason: 'GRID_RESTORED',
+          sound: 'chime',
+          duration: 5,
+        });
+      }
     } catch (err) {
-      console.warn('Failed to stop native alarm:', err);
+      console.warn('Failed to stop/trigger native alarm:', err);
     }
   }
 

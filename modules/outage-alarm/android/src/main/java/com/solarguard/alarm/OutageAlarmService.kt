@@ -63,7 +63,7 @@ class OutageAlarmService : Service() {
                 return
             }
 
-            if (now - lastTriggerTime < COOLDOWN_MS) {
+            if (reason != "GRID_RESTORED" && now - lastTriggerTime < COOLDOWN_MS) {
                 val elapsed = now - lastTriggerTime
                 Log.d(TAG, "[Alarm Ignored] Reason: Cooldown Active (Elapsed: ${elapsed / 1000}s / ${COOLDOWN_MS / 1000}s)")
                 return
