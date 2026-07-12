@@ -359,74 +359,78 @@ export function DashboardScreen() {
 
         {telemetry ? (
           <>
-            {/* Smart Status Banner */}
-            {(() => {
-              if (!isOutage) {
-                // Green: Grid Connected
-                const isExporting = telemetry.wirePower < 0;
-                const powerStr = formatPower(Math.abs(telemetry.wirePower));
-                return (
-                  <View style={[styles.gridBanner, { borderColor: Colors.success + '44' }, isAmoled && styles.bannerAmoled]}>
-                    <View style={[styles.gridBannerGlow, { backgroundColor: Colors.successGlow }]} />
-                    <Animated.View style={{ transform: [{ scale: gridPulse }] }}>
-                      <View>
-                        <PlugZap size={24} color={Colors.success} />
-                      </View>
-                    </Animated.View>
-                    <View style={{ marginLeft: Spacing.xs }}>
-                      <Text style={styles.gridBannerTitle}>Grid Connected</Text>
-                      <Text style={styles.gridBannerSub}>
-                        {isExporting ? `Exporting ${powerStr}` : telemetry.wirePower > 0 ? `Importing ${powerStr}` : 'Standby'}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              } else {
-                const warningThreshold = settings?.batteryWarningThreshold ?? 20;
-                const isCritical = (telemetry.batterySoc ?? 100) <= warningThreshold;
-                if (isCritical) {
-                  // Red: Battery Critical
+            {/* Smart Status Banner — key forces full remount when banner type changes to prevent Fabric assertion crash */}
+            <View key={!isOutage ? 'grid-on' : (telemetry.batterySoc ?? 100) <= (settings?.batteryWarningThreshold ?? 20) ? 'critical' : 'outage'}>
+              {(() => {
+                if (!isOutage) {
+                  // Green: Grid Connected
+                  const isExporting = telemetry.wirePower < 0;
+                  const powerStr = formatPower(Math.abs(telemetry.wirePower));
                   return (
-                    <View style={[styles.gridBanner, { borderColor: Colors.danger + '44' }, isAmoled && styles.bannerAmoled]}>
-                      <View style={[styles.gridBannerGlow, { backgroundColor: Colors.dangerGlow }]} />
-                      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.danger, opacity: outageFlash }]} pointerEvents="none" />
-                      <Animated.View style={{ transform: [{ scale: bannerPulse }] }}>
+                    <View style={[styles.gridBanner, { borderColor: Colors.success + '44' }, isAmoled && styles.bannerAmoled]}>
+                      <View style={[styles.gridBannerGlow, { backgroundColor: Colors.successGlow }]} />
+                      <Animated.View style={{ transform: [{ scale: gridPulse }] }}>
                         <View>
-                          <BatteryWarning size={24} color={Colors.danger} />
+                          <PlugZap size={24} color={Colors.success} />
                         </View>
                       </Animated.View>
                       <View style={{ marginLeft: Spacing.xs }}>
-                        <Text style={styles.gridBannerTitle}>Battery Critical</Text>
+                        <Text style={styles.gridBannerTitle}>Grid Connected</Text>
                         <Text style={styles.gridBannerSub}>
-                          {telemetry.batterySoc}% SOC · Estimated remaining {getBackupTimeText()}
+                          {isExporting ? `Exporting ${powerStr}` : telemetry.wirePower > 0 ? `Importing ${powerStr}` : 'Standby'}
                         </Text>
                       </View>
                     </View>
                   );
                 } else {
-                  // Yellow: Running on Battery
-                  return (
-                    <View style={[styles.gridBanner, { borderColor: Colors.amber + '44' }, isAmoled && styles.bannerAmoled]}>
-                      <View style={[styles.gridBannerGlow, { backgroundColor: Colors.warningGlow }]} />
-                      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.danger, opacity: outageFlash }]} pointerEvents="none" />
-                      <View>
-                        {batteryIsCharging ? (
-                          <BatteryCharging size={24} color={Colors.amber} />
-                        ) : (
-                          <BatteryMedium size={24} color={Colors.amber} />
-                        )}
+                  const warningThreshold = settings?.batteryWarningThreshold ?? 20;
+                  const isCritical = (telemetry.batterySoc ?? 100) <= warningThreshold;
+                  if (isCritical) {
+                    // Red: Battery Critical
+                    return (
+                      <View style={[styles.gridBanner, { borderColor: Colors.danger + '44' }, isAmoled && styles.bannerAmoled]}>
+                        <View style={[styles.gridBannerGlow, { backgroundColor: Colors.dangerGlow }]} />
+                        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.danger, opacity: outageFlash }]} pointerEvents="none" />
+                        <Animated.View style={{ transform: [{ scale: bannerPulse }] }}>
+                          <View>
+                            <BatteryWarning size={24} color={Colors.danger} />
+                          </View>
+                        </Animated.View>
+                        <View style={{ marginLeft: Spacing.xs }}>
+                          <Text style={styles.gridBannerTitle}>Battery Critical</Text>
+                          <Text style={styles.gridBannerSub}>
+                            {telemetry.batterySoc}% SOC · Estimated remaining {getBackupTimeText()}
+                          </Text>
+                        </View>
                       </View>
-                      <View style={{ marginLeft: Spacing.xs }}>
-                        <Text style={styles.gridBannerTitle}>Running on Battery</Text>
-                        <Text style={styles.gridBannerSub}>
-                          Remaining {getBackupTimeText()}
-                        </Text>
+                    );
+                  } else {
+                    // Yellow: Running on Battery
+                    return (
+                      <View style={[styles.gridBanner, { borderColor: Colors.amber + '44' }, isAmoled && styles.bannerAmoled]}>
+                        <View style={[styles.gridBannerGlow, { backgroundColor: Colors.warningGlow }]} />
+                        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: Colors.danger, opacity: outageFlash }]} pointerEvents="none" />
+                        <View>
+                          <View>
+                            {batteryIsCharging ? (
+                              <BatteryCharging size={24} color={Colors.amber} />
+                            ) : (
+                              <BatteryMedium size={24} color={Colors.amber} />
+                            )}
+                          </View>
+                        </View>
+                        <View style={{ marginLeft: Spacing.xs }}>
+                          <Text style={styles.gridBannerTitle}>Running on Battery</Text>
+                          <Text style={styles.gridBannerSub}>
+                            Remaining {getBackupTimeText()}
+                          </Text>
+                        </View>
                       </View>
-                    </View>
-                  );
+                    );
+                  }
                 }
-              }
-            })()}
+              })()}
+            </View>
 
             {/* Battery Section */}
             <View style={styles.section}>
@@ -448,6 +452,7 @@ export function DashboardScreen() {
               <View style={styles.statsRow}>
                 <View style={[styles.statCell, { flex: 1, marginRight: Spacing.sm }]}>
                   <StatusCard
+                    key={isGridOn ? 'grid-on' : 'grid-off'}
                     title="Grid"
                     value={isGridOn ? 'Connected' : 'OFFLINE'}
                     subtitle={
