@@ -3,11 +3,40 @@ import { fetchTelemetry } from '../api/solar';
 import { Store } from '../storage/secureStore';
 import { SettingsStore } from '../storage/settingsStore';
 import { detectAndAlert } from './stateDetector';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const MONITORING_CHANNEL_ID = 'solarguard_monitoring_channel';
 const NOTIFICATION_ID = 'solarguard_monitoring';
+const HEARTBEAT_INTERVAL_MS = 30 * 1000; // 30 seconds — keeps Hermes JS thread alive
 let isServiceRunning = false;
 let loopPromiseResolver: (() => void) | null = null;
+
+/**
+ * Sleep for the given number of milliseconds in 30-second heartbeat chunks.
+ * Each tick touches AsyncStorage to keep the Android JS thread from being suspended.
+ * Returns early if the service is stopped mid-sleep.
+ */
+async function heartbeatSleep(totalMs: number): Promise<void> {
+  const end = Date.now() + totalMs;
+  while (isServiceRunning && Date.now() < end) {
+    const remaining = end - Date.now();
+    const tick = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+    await new Promise<void>((r) => {
+      const timer = setTimeout(r, tick);
+      ForegroundServiceManager._abortSleep = () => {
+        clearTimeout(timer);
+        r();
+      };
+    });
+    if (!isServiceRunning) break;
+    // Heartbeat: lightweight AsyncStorage touch to prove the JS thread is alive
+    try {
+      await AsyncStorage.setItem('sg_fs_heartbeat', String(Date.now()));
+    } catch {
+      // Non-fatal — just keep going
+    }
+  }
+}
 
 // Register the Notifee foreground service runner
 notifee.registerForegroundService(() => {
@@ -23,7 +52,7 @@ notifee.registerForegroundService(() => {
           const systemId = await Store.getSystemId();
           if (!systemId) {
             console.log('[ForegroundService] No System ID active. Waiting 1 minute...');
-            await new Promise<void>((r) => setTimeout(r, 60 * 1000));
+            await heartbeatSleep(60 * 1000);
             continue;
           }
 
@@ -63,22 +92,15 @@ notifee.registerForegroundService(() => {
             },
           });
 
-          // Sleep for the user-configured interval (settings refresh interval)
+          // Sleep using heartbeat chunks to keep the JS thread warm
           const refreshMinutes = settings.refreshIntervalMinutes ?? 5;
           const delayMs = Math.max(1, refreshMinutes) * 60 * 1000;
-          await new Promise<void>((r) => {
-            const timer = setTimeout(r, delayMs);
-            // Store abort handler so we can stop immediately if stopped
-            ForegroundServiceManager._abortSleep = () => {
-              clearTimeout(timer);
-              r();
-            };
-          });
+          await heartbeatSleep(delayMs);
 
         } catch (error) {
           console.warn('[ForegroundService] Loop error:', error);
-          // On error, sleep 1 minute before retrying
-          await new Promise<void>((r) => setTimeout(r, 60 * 1000));
+          // On error, sleep 1 minute before retrying (also via heartbeat)
+          await heartbeatSleep(60 * 1000);
         }
       }
 
