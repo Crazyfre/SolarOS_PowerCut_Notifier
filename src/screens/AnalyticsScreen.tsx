@@ -156,6 +156,13 @@ export function AnalyticsScreen() {
               isAmoled={isAmoled}
             />
             <MetricCard
+              title="House Consumed"
+              value={formatKwh(telemetry?.useValue)}
+              icon={<House size={18} color={Colors.blueLight} />}
+              color={Colors.blueLight}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
               title="Grid Imported"
               value={formatKwh(telemetry?.buyValue)}
               icon={<ArrowDownLeft size={18} color={Colors.danger} />}
@@ -167,13 +174,6 @@ export function AnalyticsScreen() {
               value={formatKwh(telemetry?.gridValue)}
               icon={<ArrowUpRight size={18} color={Colors.success} />}
               color={Colors.success}
-              isAmoled={isAmoled}
-            />
-            <MetricCard
-              title="House Consumed"
-              value={formatKwh(telemetry?.useValue)}
-              icon={<House size={18} color={Colors.blueLight} />}
-              color={Colors.blueLight}
               isAmoled={isAmoled}
             />
             <MetricCard
@@ -217,6 +217,13 @@ export function AnalyticsScreen() {
               isAmoled={isAmoled}
             />
             <MetricCard
+              title="Energy Consumed"
+              value={formatKwh(telemetry?.useMonth)}
+              icon={<House size={18} color={Colors.blueLight} />}
+              color={Colors.blueLight}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
               title="Grid Imported"
               value={formatKwh(telemetry?.buyMonth)}
               icon={<ArrowDownLeft size={18} color={Colors.danger} />}
@@ -228,13 +235,6 @@ export function AnalyticsScreen() {
               value={formatKwh(telemetry?.gridMonth)}
               icon={<ArrowUpRight size={18} color={Colors.success} />}
               color={Colors.success}
-              isAmoled={isAmoled}
-            />
-            <MetricCard
-              title="Energy Consumed"
-              value={formatKwh(telemetry?.useMonth)}
-              icon={<House size={18} color={Colors.blueLight} />}
-              color={Colors.blueLight}
               isAmoled={isAmoled}
             />
             <MetricCard
@@ -278,6 +278,13 @@ export function AnalyticsScreen() {
               isAmoled={isAmoled}
             />
             <MetricCard
+              title="Total Consumed"
+              value={formatKwh(telemetry?.useTotal)}
+              icon={<House size={18} color={Colors.blueLight} />}
+              color={Colors.blueLight}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
               title="Grid Imported"
               value={formatKwh(telemetry?.buyTotal)}
               icon={<ArrowDownLeft size={18} color={Colors.danger} />}
@@ -289,13 +296,6 @@ export function AnalyticsScreen() {
               value={formatKwh(telemetry?.gridTotal)}
               icon={<ArrowUpRight size={18} color={Colors.success} />}
               color={Colors.success}
-              isAmoled={isAmoled}
-            />
-            <MetricCard
-              title="Total Consumed"
-              value={formatKwh(telemetry?.useTotal)}
-              icon={<House size={18} color={Colors.blueLight} />}
-              color={Colors.blueLight}
               isAmoled={isAmoled}
             />
             <MetricCard
