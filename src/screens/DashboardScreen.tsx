@@ -553,11 +553,13 @@ export function DashboardScreen() {
                     <Text style={styles.healthLabel}>Battery</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }}>
-                    {getBatteryHealth() === 'Critical' ? (
-                      <TriangleAlert size={16} color={Colors.danger} />
-                    ) : (
-                      <CircleCheckBig size={16} color={Colors.success} />
-                    )}
+                    <View>
+                      {getBatteryHealth() === 'Critical' ? (
+                        <TriangleAlert size={16} color={Colors.danger} />
+                      ) : (
+                        <CircleCheckBig size={16} color={Colors.success} />
+                      )}
+                    </View>
                     <Text style={[styles.healthValue, { color: getBatteryHealth() === 'Critical' ? Colors.danger : Colors.success }]}>
                       {getBatteryHealth()} ({telemetry.batterySoc}%)
                     </Text>
@@ -570,11 +572,13 @@ export function DashboardScreen() {
                     <Text style={styles.healthLabel}>Grid Connection</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }}>
-                    {isGridOn ? (
-                      <CircleCheckBig size={16} color={Colors.success} />
-                    ) : (
-                      <CircleOff size={16} color={Colors.danger} />
-                    )}
+                    <View>
+                      {isGridOn ? (
+                        <CircleCheckBig size={16} color={Colors.success} />
+                      ) : (
+                        <CircleOff size={16} color={Colors.danger} />
+                      )}
+                    </View>
                     <Text style={[styles.healthValue, { color: isGridOn ? Colors.success : Colors.danger }]}>
                       {getGridHealth()}
                     </Text>
@@ -587,13 +591,15 @@ export function DashboardScreen() {
                     <Text style={styles.healthLabel}>Solar PV Production</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }}>
-                    {telemetry.pvPower && telemetry.pvPower > 1000 ? (
-                      <CircleCheckBig size={16} color={Colors.success} />
-                    ) : telemetry.pvPower && telemetry.pvPower > 0 ? (
-                      <TriangleAlert size={16} color={Colors.amber} />
-                    ) : (
-                      <CircleOff size={16} color={Colors.textMuted} />
-                    )}
+                    <View>
+                      {telemetry.pvPower && telemetry.pvPower > 1000 ? (
+                        <CircleCheckBig size={16} color={Colors.success} />
+                      ) : telemetry.pvPower && telemetry.pvPower > 0 ? (
+                        <TriangleAlert size={16} color={Colors.amber} />
+                      ) : (
+                        <CircleOff size={16} color={Colors.textMuted} />
+                      )}
+                    </View>
                     <Text style={[styles.healthValue, { color: telemetry.pvPower && telemetry.pvPower > 0 ? Colors.success : Colors.textMuted }]}>
                       {getSolarHealth()}
                     </Text>
