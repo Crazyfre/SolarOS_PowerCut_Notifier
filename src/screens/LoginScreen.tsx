@@ -17,7 +17,6 @@ import { loginWithPassword } from '../api/auth';
 import { fetchStations } from '../api/solar';
 import { useApp } from '../context/AppContext';
 import { requestNotificationPermissions } from '../services/notifications';
-import { registerBackgroundFetch } from '../services/backgroundFetch';
 import {
   SunMedium,
   TriangleAlert,
@@ -107,7 +106,6 @@ export function LoginScreen() {
     setLoadingStep('Setting up…');
 
     await requestNotificationPermissions();
-    await registerBackgroundFetch();
     await login(tokens, stationId, email.trim());
   };
 

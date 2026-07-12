@@ -7,12 +7,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
-      "supportsTablet": false,
-      "infoPlist": {
-        "UIBackgroundModes": [
-          "fetch"
-        ]
-      }
+      "supportsTablet": false
     },
     "android": {
       "adaptiveIcon": {
@@ -56,12 +51,6 @@
       ],
       "expo-font",
       "expo-secure-store",
-      [
-        "expo-background-fetch",
-        {
-          "backgroundFetchEnabled": true
-        }
-      ],
       [
         "expo-splash-screen",
         {

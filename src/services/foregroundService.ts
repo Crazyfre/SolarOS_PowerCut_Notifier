@@ -46,6 +46,18 @@ async function heartbeatSleep(totalMs: number): Promise<void> {
   }
 }
 
+const diagCache: Record<string, string> = {};
+
+async function updateDiagnostic(key: string, value: string): Promise<void> {
+  if (diagCache[key] === value) return;
+  diagCache[key] = value;
+  try {
+    await AsyncStorage.setItem(key, value);
+  } catch {
+    // Non-fatal
+  }
+}
+
 // Register the Notifee foreground service runner
 notifee.registerForegroundService(() => {
   return new Promise<void>((resolve) => {
@@ -60,14 +72,34 @@ notifee.registerForegroundService(() => {
           const systemId = await Store.getSystemId();
           if (!systemId) {
             console.log('[ForegroundService] No System ID active. Waiting 1 minute...');
+            await updateDiagnostic('sg_fs_state', 'Error / Retrying');
+            await updateDiagnostic('sg_fs_last_result', 'Authentication Error');
             await heartbeatSleep(60 * 1000);
             continue;
           }
 
           const settings = await SettingsStore.loadSettings();
           
-          // Fetch fresh telemetry data from SolarOS
-          const telemetry = await fetchTelemetry(systemId);
+          await updateDiagnostic('sg_fs_state', 'Polling');
+
+          // Fetch fresh telemetry data from SolarOS with custom errors
+          let telemetry;
+          try {
+            telemetry = await fetchTelemetry(systemId);
+            await updateDiagnostic('sg_fs_last_result', 'Success');
+            await updateDiagnostic('sg_fs_state', 'Waiting for Next Poll');
+          } catch (err: any) {
+            const errorMsg = err?.message || String(err);
+            let resultType: 'Success' | 'Network Error' | 'Authentication Error' | 'API Error' = 'API Error';
+            if (errorMsg === 'AUTH_REQUIRED') {
+              resultType = 'Authentication Error';
+            } else if (errorMsg.includes('Network') || errorMsg.includes('Network request failed') || errorMsg.includes('ECONNREFUSED')) {
+              resultType = 'Network Error';
+            }
+            await updateDiagnostic('sg_fs_last_result', resultType);
+            await updateDiagnostic('sg_fs_state', 'Error / Retrying');
+            throw err;
+          }
           
           // Run state analysis & alarm siren triggers
           await detectAndAlert(telemetry, settings);
@@ -103,12 +135,44 @@ notifee.registerForegroundService(() => {
           // Sleep using heartbeat chunks to keep the JS thread warm
           const refreshMinutes = settings.refreshIntervalMinutes ?? 5;
           const delayMs = Math.max(1, refreshMinutes) * 60 * 1000;
+          
+          const now = Date.now();
+          await updateDiagnostic('sg_fs_last_poll', String(now));
+          await updateDiagnostic('sg_fs_next_poll', String(now + delayMs));
+
           await heartbeatSleep(delayMs);
 
-        } catch (error) {
+        } catch (error: any) {
           console.warn('[ForegroundService] Loop error:', error);
-          // On error, sleep 1 minute before retrying (also via heartbeat)
-          await heartbeatSleep(60 * 1000);
+          
+          const isAuthError = error?.message === 'AUTH_REQUIRED';
+          const errorBody = isAuthError 
+            ? 'Monitoring Paused · Login Required' 
+            : 'Monitoring Active · Connection Issue';
+
+          // Update persistent notification to show connection issue / paused state
+          await notifee.displayNotification({
+            id: NOTIFICATION_ID,
+            title: 'SolarGuard Monitoring',
+            body: errorBody,
+            android: {
+              channelId: MONITORING_CHANNEL_ID,
+              asForegroundService: true,
+              ongoing: true,
+              onlyAlertOnce: true,
+              importance: AndroidImportance.DEFAULT,
+              pressAction: {
+                id: 'default',
+              },
+            },
+          });
+
+          const now = Date.now();
+          await updateDiagnostic('sg_fs_last_poll', String(now));
+          const delayMs = isAuthError ? 5 * 60 * 1000 : 60 * 1000;
+          await updateDiagnostic('sg_fs_next_poll', String(now + delayMs));
+
+          await heartbeatSleep(delayMs);
         }
       }
 

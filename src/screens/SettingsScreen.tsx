@@ -13,16 +13,17 @@ import {
   AppState,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../theme';
 import { useApp } from '../context/AppContext';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { unregisterBackgroundFetch } from '../services/backgroundFetch';
 import { StationService, SolarStation } from '../services/stationService';
 import { DevOverridesStore } from '../storage/devOverridesStore';
 import { sendTestNotification, ALARM_SOUND_OPTIONS, requestNotificationPermissions } from '../services/notifications';
 import OutageAlarm from '../../modules/outage-alarm';
+import { ForegroundServiceManager } from '../services/foregroundService';
 import {
   ArrowLeft,
   BellRing,
@@ -93,6 +94,45 @@ export function SettingsScreen() {
   const [quietHoursStart, setQuietHoursStart] = useState(settings.quietHoursStart ?? '23:00');
   const [quietHoursEnd, setQuietHoursEnd] = useState(settings.quietHoursEnd ?? '07:00');
   const [foregroundServiceEnabled, setForegroundServiceEnabled] = useState(settings.foregroundServiceEnabled ?? false);
+
+  // Developer features visibility & diagnostics state
+  const isFocused = useIsFocused();
+  const [devUnlocked, setDevUnlocked] = useState(false);
+  const [fsState, setFsState] = useState('Unknown');
+  const [fsLastResult, setFsLastResult] = useState('Unknown');
+  const [fsLastPoll, setFsLastPoll] = useState('');
+  const [fsNextPoll, setFsNextPoll] = useState('');
+
+  useEffect(() => {
+    if (isFocused) {
+      (async () => {
+        const unlocked = await AsyncStorage.getItem('sg_dev_options_unlocked') === 'true';
+        setDevUnlocked(unlocked);
+        
+        if (unlocked) {
+          const state = await AsyncStorage.getItem('sg_fs_state') ?? 'Waiting for Next Poll';
+          const lastResult = await AsyncStorage.getItem('sg_fs_last_result') ?? 'Success';
+          const lastPoll = await AsyncStorage.getItem('sg_fs_last_poll');
+          const nextPoll = await AsyncStorage.getItem('sg_fs_next_poll');
+          
+          setFsState(state);
+          setFsLastResult(lastResult);
+          
+          if (lastPoll) {
+            setFsLastPoll(new Date(parseInt(lastPoll, 10)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+          } else {
+            setFsLastPoll('Never');
+          }
+          
+          if (nextPoll) {
+            setFsNextPoll(new Date(parseInt(nextPoll, 10)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+          } else {
+            setFsNextPoll('Never');
+          }
+        }
+      })();
+    }
+  }, [isFocused]);
 
   // Stations List state
   const [stations, setStations] = useState<SolarStation[]>([]);
@@ -273,7 +313,6 @@ export function SettingsScreen() {
         text: 'Sign Out',
         style: 'destructive',
         onPress: async () => {
-          await unregisterBackgroundFetch();
           await logout();
         },
       },
@@ -755,223 +794,275 @@ export function SettingsScreen() {
         </View>
 
         {/* DEVELOPER OPTIONS CONFIG */}
-        <View style={styles.section}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
-            <CodeXml size={16} color={Colors.dangerLight} />
-            <Text style={[styles.sectionHeader, { marginBottom: 0, color: Colors.dangerLight }]}>Developer options</Text>
-          </View>
-          <View style={styles.card}>
-            {/* Force Test Alarm */}
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Test Alarm System</Text>
-                <Text style={styles.rowSub}>Immediately trigger critical alarm sound test</Text>
-              </View>
-              <TouchableOpacity
-                style={styles.testAlarmBtn}
-                onPress={async () => {
-                  try {
-                    await requestNotificationPermissions();
-                    const tempSettings = {
-                      alarmDurationSeconds: alarmDuration,
-                      useAlarmSound,
-                      onlyAlarmNoPopup,
-                      alarmSoundName,
-                      alertOnPowerCut,
-                      alertOnGridOffOnly,
-                      alertOnBatteryDischarge,
-                      alertOnOverSolarLoad,
-                      alertOnBatteryPercent,
-                      batteryWarningThreshold: parseInt(batteryWarningThreshold, 10) || 20,
-                      batteryCapacity: parseFloat(batteryCapacity) || 5.12,
-                      activeStationId,
-                      refreshIntervalMinutes: refreshInterval,
-                      quietHoursStart,
-                      quietHoursEnd,
-                      quietHoursEnabled,
-                      amoledTheme,
-                      foregroundServiceEnabled,
-                    };
-                    await sendTestNotification(tempSettings);
-                    Alert.alert('Alert Sent', `Critical test alert has been scheduled for ${alarmDuration}s.`);
-                  } catch (err) {
-                    Alert.alert('Error', 'Failed to send alert.');
-                  }
-                }}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <BellRing size={14} color={Colors.dangerLight} />
-                  <Text style={styles.testAlarmBtnText}>Test</Text>
-                </View>
-              </TouchableOpacity>
+        {devUnlocked && (
+          <View style={styles.section}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+              <CodeXml size={16} color={Colors.dangerLight} />
+              <Text style={[styles.sectionHeader, { marginBottom: 0, color: Colors.dangerLight }]}>Developer Options</Text>
             </View>
 
-            <View style={styles.separator} />
-
-            {/* Overrides Toggle */}
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Mock Telemetry Overrides</Text>
-                <Text style={styles.rowSub}>Enable manually overriding grid & battery data</Text>
+            {/* Diagnostics Panel */}
+            <View style={[styles.card, { marginBottom: Spacing.md }]}>
+              <Text style={[styles.rowTitle, { color: Colors.amberLight, marginBottom: Spacing.sm }]}>Monitoring Engine Diagnostics</Text>
+              
+              <View style={styles.diagRow}>
+                <Text style={styles.diagLabel}>Status</Text>
+                <Text style={[styles.diagValue, { color: ForegroundServiceManager.isServiceRunning() ? Colors.success : Colors.danger, fontWeight: 'bold' }]}>
+                  {ForegroundServiceManager.isServiceRunning() ? 'Running' : 'Stopped'}
+                </Text>
               </View>
-              <Switch
-                value={devOverridesEnabled}
-                onValueChange={setDevOverridesEnabled}
-                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
-                thumbColor={devOverridesEnabled ? Colors.textInverse : Colors.textMuted}
-              />
+              <View style={styles.diagSeparator} />
+              
+              <View style={styles.diagRow}>
+                <Text style={styles.diagLabel}>Current State</Text>
+                <Text style={[styles.diagValue, { color: fsState.includes('Error') ? Colors.danger : Colors.textPrimary }]}>{fsState}</Text>
+              </View>
+              <View style={styles.diagSeparator} />
+
+              <View style={styles.diagRow}>
+                <Text style={styles.diagLabel}>Last Poll Result</Text>
+                <Text style={[styles.diagValue, { color: fsLastResult === 'Success' ? Colors.success : Colors.danger }]}>{fsLastResult}</Text>
+              </View>
+              <View style={styles.diagSeparator} />
+
+              <View style={styles.diagRow}>
+                <Text style={styles.diagLabel}>Service Type</Text>
+                <Text style={styles.diagValue}>Foreground Service</Text>
+              </View>
+              <View style={styles.diagSeparator} />
+
+              <View style={styles.diagRow}>
+                <Text style={styles.diagLabel}>Polling Interval</Text>
+                <Text style={styles.diagValue}>{refreshInterval} minute{refreshInterval !== 1 ? 's' : ''}</Text>
+              </View>
+              <View style={styles.diagSeparator} />
+
+              <View style={styles.diagRow}>
+                <Text style={styles.diagLabel}>Last Poll Time</Text>
+                <Text style={styles.diagValue}>{fsLastPoll}</Text>
+              </View>
+              <View style={styles.diagSeparator} />
+
+              <View style={styles.diagRow}>
+                <Text style={styles.diagLabel}>Next Poll Time</Text>
+                <Text style={styles.diagValue}>{fsNextPoll}</Text>
+              </View>
             </View>
 
-            {devOverridesEnabled && (
-              <View style={styles.developerSubSection}>
-                <View style={styles.separator} />
-
-                {/* Grid Status Selector */}
-                <View style={styles.column}>
-                  <Text style={styles.rowTitle}>Grid Status</Text>
-                  <View style={styles.durationSelector}>
-                    {(['on', 'off'] as const).map((status) => (
-                      <TouchableOpacity
-                        key={status}
-                        style={[
-                          styles.durationButton,
-                          devGridRelayStatus === status && styles.durationButtonActive,
-                          { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }
-                        ]}
-                        onPress={() => setDevGridRelayStatus(status)}
-                      >
-                        {status === 'on' ? (
-                          <PlugZap size={14} color={devGridRelayStatus === status ? Colors.textInverse : Colors.success} />
-                        ) : (
-                          <CircleOff size={14} color={devGridRelayStatus === status ? Colors.textInverse : Colors.danger} />
-                        )}
-                        <Text
-                          style={[
-                            styles.durationText,
-                            devGridRelayStatus === status && styles.durationTextActive,
-                          ]}
-                        >
-                          Grid {status === 'on' ? 'On' : 'Off'}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+            {/* Test Actions & Overrides */}
+            <View style={styles.card}>
+              {/* Force Test Alarm */}
+              <View style={styles.row}>
+                <View style={styles.rowInfo}>
+                  <Text style={styles.rowTitle}>Test Alarm System</Text>
+                  <Text style={styles.rowSub}>Immediately trigger critical alarm sound test</Text>
                 </View>
-
-                <View style={styles.separator} />
-
-                {/* Battery Status Selector */}
-                <View style={styles.column}>
-                  <Text style={styles.rowTitle}>Battery Status</Text>
-                  <View style={styles.durationSelector}>
-                    {['CHARGE', 'DISCHARGE', 'IDLE'].map((status) => (
-                      <TouchableOpacity
-                        key={status}
-                        style={[
-                          styles.durationButton,
-                          devBatteryStatus === status && styles.durationButtonActive,
-                          { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }
-                        ]}
-                        onPress={() => setDevBatteryStatus(status)}
-                      >
-                        {status === 'CHARGE' ? (
-                          <BatteryCharging size={14} color={devBatteryStatus === status ? Colors.textInverse : Colors.blue} />
-                        ) : status === 'DISCHARGE' ? (
-                          <Battery size={14} color={devBatteryStatus === status ? Colors.textInverse : Colors.amber} />
-                        ) : (
-                          <Pause size={14} color={devBatteryStatus === status ? Colors.textInverse : Colors.textSecondary} />
-                        )}
-                        <Text
-                          style={[
-                            styles.durationText,
-                            devBatteryStatus === status && styles.durationTextActive,
-                          ]}
-                        >
-                          {status === 'CHARGE' ? 'Charging' : status === 'DISCHARGE' ? 'Discharging' : 'Idle'}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
+                <TouchableOpacity
+                  style={styles.testAlarmBtn}
+                  onPress={async () => {
+                    try {
+                      await requestNotificationPermissions();
+                      const tempSettings = {
+                        alarmDurationSeconds: alarmDuration,
+                        useAlarmSound,
+                        onlyAlarmNoPopup,
+                        alarmSoundName,
+                        alertOnPowerCut,
+                        alertOnGridOffOnly,
+                        alertOnBatteryDischarge,
+                        alertOnOverSolarLoad,
+                        alertOnBatteryPercent,
+                        batteryWarningThreshold: parseInt(batteryWarningThreshold, 10) || 20,
+                        batteryCapacity: parseFloat(batteryCapacity) || 5.12,
+                        activeStationId,
+                        refreshIntervalMinutes: refreshInterval,
+                        quietHoursStart,
+                        quietHoursEnd,
+                        quietHoursEnabled,
+                        amoledTheme,
+                        foregroundServiceEnabled,
+                      };
+                      await sendTestNotification(tempSettings);
+                      Alert.alert('Alert Sent', `Critical test alert has been scheduled for ${alarmDuration}s.`);
+                    } catch (err) {
+                      Alert.alert('Error', 'Failed to send alert.');
+                    }
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <BellRing size={14} color={Colors.dangerLight} />
+                    <Text style={styles.testAlarmBtnText}>Test</Text>
                   </View>
-                </View>
-
-                <View style={styles.separator} />
-
-                {/* Grid inputs */}
-                <View style={styles.developerInputGrid}>
-                  <View style={styles.devInputCol}>
-                    <Text style={styles.inputLabel}>Battery SoC (%)</Text>
-                    <TextInput
-                      style={styles.devTextInput}
-                      value={devBatterySoc}
-                      onChangeText={setDevBatterySoc}
-                      keyboardType="numeric"
-                      maxLength={3}
-                    />
-                  </View>
-                  <View style={styles.devInputCol}>
-                    <Text style={styles.inputLabel}>Battery Power (W)</Text>
-                    <TextInput
-                      style={styles.devTextInput}
-                      value={devBatteryPower}
-                      onChangeText={setDevBatteryPower}
-                      keyboardType="numeric"
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.developerInputGrid}>
-                  <View style={styles.devInputCol}>
-                    <Text style={styles.inputLabel}>Solar PV (W)</Text>
-                    <TextInput
-                      style={styles.devTextInput}
-                      value={devPvPower}
-                      onChangeText={setDevPvPower}
-                      keyboardType="numeric"
-                    />
-                  </View>
-                  <View style={styles.devInputCol}>
-                    <Text style={styles.inputLabel}>House Load (W)</Text>
-                    <TextInput
-                      style={styles.devTextInput}
-                      value={devUsePower}
-                      onChangeText={setDevUsePower}
-                      keyboardType="numeric"
-                    />
-                  </View>
-                </View>
-
-                {/* Scheduling Overrides */}
-                <View style={styles.separator} />
-                <Text style={styles.rowTitle}>Schedule Event (seconds from now)</Text>
-                
-                <View style={styles.developerInputGrid}>
-                  <View style={styles.devInputCol}>
-                    <Text style={styles.inputLabel}>Power Cut (s)</Text>
-                    <TextInput
-                      style={styles.devTextInput}
-                      value={devScheduledPowerCutSeconds}
-                      onChangeText={setDevScheduledPowerCutSeconds}
-                      keyboardType="numeric"
-                      placeholder="e.g. 15"
-                      placeholderTextColor={Colors.textMuted}
-                    />
-                  </View>
-                  <View style={styles.devInputCol}>
-                    <Text style={styles.inputLabel}>Power On (s)</Text>
-                    <TextInput
-                      style={styles.devTextInput}
-                      value={devScheduledPowerOnSeconds}
-                      onChangeText={setDevScheduledPowerOnSeconds}
-                      keyboardType="numeric"
-                      placeholder="e.g. 30"
-                      placeholderTextColor={Colors.textMuted}
-                    />
-                  </View>
-                </View>
+                </TouchableOpacity>
               </View>
-            )}
+
+              <View style={styles.separator} />
+
+              {/* Overrides Toggle */}
+              <View style={styles.row}>
+                <View style={styles.rowInfo}>
+                  <Text style={styles.rowTitle}>Mock Telemetry Overrides</Text>
+                  <Text style={styles.rowSub}>Enable manually overriding grid & battery data</Text>
+                </View>
+                <Switch
+                  value={devOverridesEnabled}
+                  onValueChange={setDevOverridesEnabled}
+                  trackColor={{ false: Colors.glassLight, true: Colors.amber }}
+                  thumbColor={devOverridesEnabled ? Colors.textInverse : Colors.textMuted}
+                />
+              </View>
+
+              {devOverridesEnabled && (
+                <View style={styles.developerSubSection}>
+                  <View style={styles.separator} />
+
+                  {/* Grid Status Selector */}
+                  <View style={styles.column}>
+                    <Text style={styles.rowTitle}>Grid Status</Text>
+                    <View style={styles.durationSelector}>
+                      {(['on', 'off'] as const).map((status) => (
+                        <TouchableOpacity
+                          key={status}
+                          style={[
+                            styles.durationButton,
+                            devGridRelayStatus === status && styles.durationButtonActive,
+                            { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }
+                          ]}
+                          onPress={() => setDevGridRelayStatus(status)}
+                        >
+                          {status === 'on' ? (
+                            <PlugZap size={14} color={devGridRelayStatus === status ? Colors.textInverse : Colors.success} />
+                          ) : (
+                            <CircleOff size={14} color={devGridRelayStatus === status ? Colors.textInverse : Colors.danger} />
+                          )}
+                          <Text
+                            style={[
+                              styles.durationText,
+                              devGridRelayStatus === status && styles.durationTextActive,
+                            ]}
+                          >
+                            Grid {status === 'on' ? 'On' : 'Off'}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  <View style={styles.separator} />
+
+                  {/* Battery Status Selector */}
+                  <View style={styles.column}>
+                    <Text style={styles.rowTitle}>Battery Status</Text>
+                    <View style={styles.durationSelector}>
+                      {['CHARGE', 'DISCHARGE', 'IDLE'].map((status) => (
+                        <TouchableOpacity
+                          key={status}
+                          style={[
+                            styles.durationButton,
+                            devBatteryStatus === status && styles.durationButtonActive,
+                            { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }
+                          ]}
+                          onPress={() => setDevBatteryStatus(status)}
+                        >
+                          {status === 'CHARGE' ? (
+                            <BatteryCharging size={14} color={devBatteryStatus === status ? Colors.textInverse : Colors.blue} />
+                          ) : status === 'DISCHARGE' ? (
+                            <Battery size={14} color={devBatteryStatus === status ? Colors.textInverse : Colors.amber} />
+                          ) : (
+                            <Pause size={14} color={devBatteryStatus === status ? Colors.textInverse : Colors.textSecondary} />
+                          )}
+                          <Text
+                            style={[
+                              styles.durationText,
+                              devBatteryStatus === status && styles.durationTextActive,
+                            ]}
+                          >
+                            {status === 'CHARGE' ? 'Charging' : status === 'DISCHARGE' ? 'Discharging' : 'Idle'}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  <View style={styles.separator} />
+
+                  {/* Grid inputs */}
+                  <View style={styles.developerInputGrid}>
+                    <View style={styles.devInputCol}>
+                      <Text style={styles.inputLabel}>Battery SoC (%)</Text>
+                      <TextInput
+                        style={styles.devTextInput}
+                        value={devBatterySoc}
+                        onChangeText={setDevBatterySoc}
+                        keyboardType="numeric"
+                        maxLength={3}
+                      />
+                    </View>
+                    <View style={styles.devInputCol}>
+                      <Text style={styles.inputLabel}>Battery Power (W)</Text>
+                      <TextInput
+                        style={styles.devTextInput}
+                        value={devBatteryPower}
+                        onChangeText={setDevBatteryPower}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.developerInputGrid}>
+                    <View style={styles.devInputCol}>
+                      <Text style={styles.inputLabel}>Solar PV (W)</Text>
+                      <TextInput
+                        style={styles.devTextInput}
+                        value={devPvPower}
+                        onChangeText={setDevPvPower}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                    <View style={styles.devInputCol}>
+                      <Text style={styles.inputLabel}>House Load (W)</Text>
+                      <TextInput
+                        style={styles.devTextInput}
+                        value={devUsePower}
+                        onChangeText={setDevUsePower}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                  </View>
+
+                  {/* Scheduling Overrides */}
+                  <View style={styles.separator} />
+                  <Text style={styles.rowTitle}>Schedule Event (seconds from now)</Text>
+                  
+                  <View style={styles.developerInputGrid}>
+                    <View style={styles.devInputCol}>
+                      <Text style={styles.inputLabel}>Power Cut (s)</Text>
+                      <TextInput
+                        style={styles.devTextInput}
+                        value={devScheduledPowerCutSeconds}
+                        onChangeText={setDevScheduledPowerCutSeconds}
+                        keyboardType="numeric"
+                        placeholder="e.g. 15"
+                        placeholderTextColor={Colors.textMuted}
+                      />
+                    </View>
+                    <View style={styles.devInputCol}>
+                      <Text style={styles.inputLabel}>Power On (s)</Text>
+                      <TextInput
+                        style={styles.devTextInput}
+                        value={devScheduledPowerOnSeconds}
+                        onChangeText={setDevScheduledPowerOnSeconds}
+                        keyboardType="numeric"
+                        placeholder="e.g. 30"
+                        placeholderTextColor={Colors.textMuted}
+                      />
+                    </View>
+                  </View>
+                </View>
+              )}
+            </View>
           </View>
-        </View>
+        )}
 
         {/* SAVE BUTTON */}
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
@@ -1404,5 +1495,26 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily.bold,
     fontSize: Typography.fontSize.xs,
     color: Colors.textPrimary,
+  },
+  diagRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing.xs,
+  },
+  diagLabel: {
+    fontFamily: Typography.fontFamily.medium,
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textSecondary,
+  },
+  diagValue: {
+    fontFamily: Typography.fontFamily.bold,
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textPrimary,
+  },
+  diagSeparator: {
+    height: 1,
+    backgroundColor: Colors.divider,
+    marginVertical: Spacing.xs,
   },
 });

@@ -1,5 +1,6 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView, ToastAndroid, Platform, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Typography, Spacing, BorderRadius } from '../theme';
 import { useNavigation } from '@react-navigation/native';
@@ -13,6 +14,48 @@ type NavigationProp = StackNavigationProp<RootStackParamList, 'About'>;
 
 export function AboutScreen() {
   const navigation = useNavigation<NavigationProp>();
+  const [tapCount, setTapCount] = useState(0);
+  const [lastTapTime, setLastTapTime] = useState(0);
+
+  const handleVersionTap = async () => {
+    const now = Date.now();
+    const isUnlocked = await AsyncStorage.getItem('sg_dev_options_unlocked') === 'true';
+
+    if (isUnlocked) {
+      const msg = 'Developer options are already enabled.';
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(msg, ToastAndroid.SHORT);
+      } else {
+        Alert.alert('Developer Mode', msg);
+      }
+      return;
+    }
+
+    // Reset tap count if inactive for > 3 seconds
+    let newCount = tapCount + 1;
+    if (now - lastTapTime > 3000) {
+      newCount = 1;
+    }
+
+    setTapCount(newCount);
+    setLastTapTime(now);
+
+    if (newCount >= 7) {
+      await AsyncStorage.setItem('sg_dev_options_unlocked', 'true');
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('You are now a developer!', ToastAndroid.LONG);
+      } else {
+        Alert.alert('Success', 'You are now a developer!');
+      }
+      setTapCount(0);
+    } else if (newCount >= 3) {
+      const steps = 7 - newCount;
+      const msg = `You are now ${steps} step${steps > 1 ? 's' : ''} away from being a developer.`;
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(msg, ToastAndroid.SHORT);
+      }
+    }
+  };
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
@@ -29,7 +72,9 @@ export function AboutScreen() {
         {/* Content Card */}
         <View style={styles.card}>
           <Text style={styles.appTitle}>SolarGuard</Text>
-          <Text style={styles.appVersion}>Version {packageJson.version}</Text>
+          <TouchableOpacity activeOpacity={0.8} onPress={handleVersionTap}>
+            <Text style={styles.appVersion}>Version {packageJson.version}</Text>
+          </TouchableOpacity>
 
           <View style={styles.divider} />
 

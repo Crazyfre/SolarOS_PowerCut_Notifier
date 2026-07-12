@@ -18,7 +18,6 @@ import { Colors, Typography, Spacing } from './src/theme';
 import { LayoutDashboard, History, ChartColumn, SunMedium } from 'lucide-react-native';
 
 // Import background task definition so it registers at module load
-import './src/services/backgroundFetch';
 import './src/services/foregroundService';
 
 const Tab = createBottomTabNavigator();
