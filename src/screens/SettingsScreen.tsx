@@ -92,6 +92,7 @@ export function SettingsScreen() {
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(settings.quietHoursEnabled ?? false);
   const [quietHoursStart, setQuietHoursStart] = useState(settings.quietHoursStart ?? '23:00');
   const [quietHoursEnd, setQuietHoursEnd] = useState(settings.quietHoursEnd ?? '07:00');
+  const [foregroundServiceEnabled, setForegroundServiceEnabled] = useState(settings.foregroundServiceEnabled ?? false);
 
   // Stations List state
   const [stations, setStations] = useState<SolarStation[]>([]);
@@ -219,6 +220,7 @@ export function SettingsScreen() {
       quietHoursEnd,
       quietHoursEnabled,
       amoledTheme,
+      foregroundServiceEnabled,
     };
 
     if (activeStationId) {
@@ -573,6 +575,24 @@ export function SettingsScreen() {
                 </TouchableOpacity>
               )}
             </View>
+
+            <View style={styles.separator} />
+
+            {/* Foreground Service Toggle */}
+            <View style={styles.row}>
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowTitle}>Persistent Status Notification</Text>
+                <Text style={styles.rowSub}>
+                  Keep app active in background to fetch telemetry every 5 mins
+                </Text>
+              </View>
+              <Switch
+                value={foregroundServiceEnabled}
+                onValueChange={setForegroundServiceEnabled}
+                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
+                thumbColor={foregroundServiceEnabled ? Colors.textInverse : Colors.textMuted}
+              />
+            </View>
           </View>
         </View>
 
@@ -770,6 +790,7 @@ export function SettingsScreen() {
                       quietHoursEnd,
                       quietHoursEnabled,
                       amoledTheme,
+                      foregroundServiceEnabled,
                     };
                     await sendTestNotification(tempSettings);
                     Alert.alert('Alert Sent', `Critical test alert has been scheduled for ${alarmDuration}s.`);

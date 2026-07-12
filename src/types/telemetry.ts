@@ -88,6 +88,7 @@ export interface AppSettings {
   quietHoursEnd: string;               // HH:MM format
   quietHoursEnabled: boolean;
   amoledTheme: boolean;
+  foregroundServiceEnabled: boolean;
 }
 
 export interface AppState {

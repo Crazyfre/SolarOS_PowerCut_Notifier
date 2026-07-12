@@ -15,6 +15,7 @@ import { TelemetryData, OutageRecord, AuthTokens, AppSettings } from '../types/t
 import { SettingsStore, DEFAULT_SETTINGS } from '../storage/settingsStore';
 import { checkForUpdates, UpdateInfo } from '../services/updateChecker';
 import { registerNotificationChannels } from '../services/notifications';
+import { ForegroundServiceManager } from '../services/foregroundService';
 
 // ─── Context types ────────────────────────────────────────────────────────────
 
@@ -153,6 +154,19 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
     });
     return () => sub.remove();
   }, [isLoggedIn, systemId, refreshTelemetry]);
+
+  // ─── Foreground Service Sync ────────────────────────────────────────────────
+  useEffect(() => {
+    if (isLoggedIn && systemId && settings.foregroundServiceEnabled) {
+      ForegroundServiceManager.startService().catch((err) => {
+        console.warn('[AppContext] Failed to start foreground service:', err);
+      });
+    } else {
+      ForegroundServiceManager.stopService().catch((err) => {
+        console.warn('[AppContext] Failed to stop foreground service:', err);
+      });
+    }
+  }, [isLoggedIn, systemId, settings.foregroundServiceEnabled]);
 
   // ─── Actions ──────────────────────────────────────────────────────────────
 

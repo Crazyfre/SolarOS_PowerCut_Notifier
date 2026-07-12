@@ -21,6 +21,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   quietHoursEnd: '07:00',
   quietHoursEnabled: false,
   amoledTheme: false,
+  foregroundServiceEnabled: false,
 };
 
 export const SettingsStore = {

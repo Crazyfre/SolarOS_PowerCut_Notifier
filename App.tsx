@@ -19,6 +19,7 @@ import { LayoutDashboard, History, ChartColumn, SunMedium } from 'lucide-react-n
 
 // Import background task definition so it registers at module load
 import './src/services/backgroundFetch';
+import './src/services/foregroundService';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
