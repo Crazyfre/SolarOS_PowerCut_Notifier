@@ -6,11 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0A0E1A"
-    },
     "ios": {
       "supportsTablet": false,
       "infoPlist": {
@@ -67,7 +62,14 @@
           "backgroundFetchEnabled": true
         }
       ],
-      "expo-splash-screen"
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#0A0E1A"
+        }
+      ]
     ],
     "extra": {
       "apiBaseUrl": "https://eu1.solaros.com",
