@@ -236,11 +236,13 @@ export function PowerFlowDiagram({
           {/* Absolute overlay Lucide Icons */}
           {/* Grid Icon */}
           <View style={[styles.iconOverlay, { left: nodes.grid.x - 10, top: nodes.grid.y - 10 }]}>
-            {gridOn ? (
-              <PlugZap size={20} color={gridColor} strokeWidth={2} />
-            ) : (
-              <PowerOff size={20} color={gridColor} strokeWidth={2} />
-            )}
+            <View>
+              {gridOn ? (
+                <PlugZap size={20} color={gridColor} strokeWidth={2} />
+              ) : (
+                <PowerOff size={20} color={gridColor} strokeWidth={2} />
+              )}
+            </View>
           </View>
 
           {/* Solar Icon with pulse/glow/rotation */}
@@ -265,7 +267,9 @@ export function PowerFlowDiagram({
 
           {/* Battery Icon */}
           <View style={[styles.iconOverlay, { left: nodes.battery.x - 10, top: nodes.battery.y - 10 }]}>
-            {getBatteryIcon()}
+            <View>
+              {getBatteryIcon()}
+            </View>
           </View>
 
           {/* House Icon */}
@@ -276,19 +280,23 @@ export function PowerFlowDiagram({
           {/* Overlay text labels below/above nodes */}
           <View style={[styles.nodeLabel, { left: nodes.grid.x - 30, top: nodes.grid.y + 20, width: 60 }]}>
             <Text style={styles.nodeLabelTitle}>Grid</Text>
-            {gridOn && (
-              wirePower > 0 ? (
-                <Text style={styles.subText}>{formatPower(wirePower)}</Text>
-              ) : wirePower < 0 ? (
-                <Text style={styles.subText}>{formatPower(Math.abs(wirePower))}</Text>
-              ) : (
-                <Text style={styles.subText}>0W</Text>
-              )
-            )}
+            <View>
+              {gridOn ? (
+                wirePower > 0 ? (
+                  <Text style={styles.subText}>{formatPower(wirePower)}</Text>
+                ) : wirePower < 0 ? (
+                  <Text style={styles.subText}>{formatPower(Math.abs(wirePower))}</Text>
+                ) : (
+                  <Text style={styles.subText}>0W</Text>
+                )
+              ) : null}
+            </View>
           </View>
           <View style={[styles.nodeLabel, { left: nodes.solar.x - 30, top: nodes.solar.y - 42, width: 60 }]}>
             <Text style={styles.nodeLabelTitle}>Solar</Text>
-            {pvPower > 0 && <Text style={styles.subText}>{formatPower(pvPower)}</Text>}
+            <View>
+              {pvPower > 0 ? <Text style={styles.subText}>{formatPower(pvPower)}</Text> : null}
+            </View>
           </View>
           <View style={[styles.nodeLabel, { left: nodes.inverter.x - 30, top: nodes.inverter.y + 22, width: 60 }]}>
             <Text style={styles.nodeLabelTitle}>Inverter</Text>
@@ -299,7 +307,9 @@ export function PowerFlowDiagram({
           </View>
           <View style={[styles.nodeLabel, { left: nodes.house.x - 30, top: nodes.house.y + 20, width: 60 }]}>
             <Text style={styles.nodeLabelTitle}>Load</Text>
-            {usePower > 0 && <Text style={styles.subText}>{formatPower(usePower)}</Text>}
+            <View>
+              {usePower > 0 ? <Text style={styles.subText}>{formatPower(usePower)}</Text> : null}
+            </View>
           </View>
 
           {/* Animated flow dots (symmetric speed) */}
