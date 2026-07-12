@@ -23,6 +23,25 @@ import { StationService, SolarStation } from '../services/stationService';
 import { DevOverridesStore } from '../storage/devOverridesStore';
 import { sendTestNotification, ALARM_SOUND_OPTIONS, requestNotificationPermissions } from '../services/notifications';
 import OutageAlarm from '../../modules/outage-alarm';
+import {
+  ArrowLeft,
+  BellRing,
+  Bell,
+  Battery,
+  RefreshCcw,
+  MoonStar,
+  MapPinned,
+  CodeXml,
+  Save,
+  LogOut,
+  House,
+  Building2,
+  Zap,
+  PlugZap,
+  CircleOff,
+  BatteryCharging,
+  Pause,
+} from 'lucide-react-native';
 
 type RootStackParamList = {
   Dashboard: undefined;
@@ -48,6 +67,8 @@ export function SettingsScreen() {
   const [devBatteryPower, setDevBatteryPower] = useState('0');
   const [devPvPower, setDevPvPower] = useState('0');
   const [devUsePower, setDevUsePower] = useState('0');
+  const [devScheduledPowerCutSeconds, setDevScheduledPowerCutSeconds] = useState('0');
+  const [devScheduledPowerOnSeconds, setDevScheduledPowerOnSeconds] = useState('0');
 
   const [useAlarmSound, setUseAlarmSound] = useState(settings.useAlarmSound);
   const [alarmDuration, setAlarmDuration] = useState(settings.alarmDurationSeconds);
@@ -104,6 +125,12 @@ export function SettingsScreen() {
         setDevBatteryPower(String(overrides.batteryPower ?? 0));
         setDevPvPower(String(overrides.pvPower ?? 0));
         setDevUsePower(String(overrides.usePower ?? 0));
+
+        const cutTime = overrides.scheduledPowerCutTime ?? 0;
+        const onTime = overrides.scheduledPowerOnTime ?? 0;
+        const now = Date.now();
+        setDevScheduledPowerCutSeconds(cutTime > now ? String(Math.round((cutTime - now) / 1000)) : '0');
+        setDevScheduledPowerOnSeconds(onTime > now ? String(Math.round((onTime - now) / 1000)) : '0');
       } catch (err) {
         console.warn('Failed to load developer overrides:', err);
       }
@@ -209,6 +236,10 @@ export function SettingsScreen() {
     const pvVal = parseInt(devPvPower, 10);
     const useVal = parseInt(devUsePower, 10);
 
+    const cutSecs = parseInt(devScheduledPowerCutSeconds, 10);
+    const onSecs = parseInt(devScheduledPowerOnSeconds, 10);
+    const now = Date.now();
+
     const overrides = {
       enabled: devOverridesEnabled,
       gridRelayStatus: devGridRelayStatus,
@@ -217,12 +248,14 @@ export function SettingsScreen() {
       batteryPower: isNaN(powerVal) ? 0 : powerVal,
       pvPower: isNaN(pvVal) ? 0 : pvVal,
       usePower: isNaN(useVal) ? 0 : useVal,
+      scheduledPowerCutTime: (!isNaN(cutSecs) && cutSecs > 0) ? (now + cutSecs * 1000) : undefined,
+      scheduledPowerOnTime: (!isNaN(onSecs) && onSecs > 0) ? (now + onSecs * 1000) : undefined,
     };
 
     await DevOverridesStore.saveOverrides(overrides);
 
-    // Trigger immediate refresh so telemetry changes are applied & alerts run
-    await refreshTelemetry().catch(() => {});
+    // Trigger immediate refresh in the background so telemetry changes are applied & alerts run
+    refreshTelemetry().catch(() => {});
 
     Alert.alert('Success', 'Settings saved successfully!', [
       { text: 'OK', onPress: () => navigation.goBack() },
@@ -252,15 +285,19 @@ export function SettingsScreen() {
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Text style={styles.backButtonText}>←</Text>
+            <ArrowLeft size={18} color={Colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Settings</Text>
-          <View style={{ width: 32 }} /> {/* balance back button */}
+          {/* balance back button */}
+          <View style={{ width: 32 }} />
         </View>
 
         {/* ALARM SYSTEM CONFIG */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>Alarm & Sound Config</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+            <BellRing size={16} color={Colors.textSecondary} />
+            <Text style={[styles.sectionHeader, { marginBottom: 0 }]}>Alarm & Sound Config</Text>
+          </View>
           
           <View style={styles.card}>
             <View style={styles.row}>
@@ -352,7 +389,10 @@ export function SettingsScreen() {
 
         {/* ALERTS FILTER */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>Alert Filter Preferences</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+            <Bell size={16} color={Colors.textSecondary} />
+            <Text style={[styles.sectionHeader, { marginBottom: 0 }]}>Alert Filter Preferences</Text>
+          </View>
 
           <View style={styles.card}>
             <View style={styles.row}>
@@ -445,7 +485,10 @@ export function SettingsScreen() {
 
         {/* SYSTEM PERMISSIONS & BACKGROUND */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>System Permissions & Background</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+            <Battery size={16} color={Colors.textSecondary} />
+            <Text style={[styles.sectionHeader, { marginBottom: 0 }]}>System Permissions & Background</Text>
+          </View>
           <View style={styles.card}>
             {/* Notification Permissions */}
             <View style={styles.row}>
@@ -511,7 +554,7 @@ export function SettingsScreen() {
                       [
                         { text: 'Cancel', style: 'cancel' },
                         {
-                          text: 'Configure ⚙️',
+                          text: 'Configure',
                           onPress: () => {
                             if (Platform.OS === 'android') {
                               Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS').catch(() => {
@@ -535,7 +578,10 @@ export function SettingsScreen() {
 
         {/* SMART COMPANION CONFIG */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>Smart Companion Config</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+            <MapPinned size={16} color={Colors.textSecondary} />
+            <Text style={[styles.sectionHeader, { marginBottom: 0 }]}>Smart Companion Config</Text>
+          </View>
           <View style={styles.card}>
             {/* Station switcher */}
             {stations.length > 0 && (
@@ -549,16 +595,23 @@ export function SettingsScreen() {
                       style={[
                         styles.stationButton,
                         activeStationId === st.id && styles.stationButtonActive,
+                        { flexDirection: 'row', alignItems: 'center', gap: 6 }
                       ]}
                       onPress={() => setActiveStationId(st.id)}
                     >
+                      {st.name.includes('Home') ? (
+                        <House size={16} color={activeStationId === st.id ? Colors.textInverse : Colors.amber} />
+                      ) : st.name.includes('Office') ? (
+                        <Building2 size={16} color={activeStationId === st.id ? Colors.textInverse : Colors.amber} />
+                      ) : (
+                        <Zap size={16} color={activeStationId === st.id ? Colors.textInverse : Colors.amber} />
+                      )}
                       <Text
                         style={[
                           styles.stationText,
                           activeStationId === st.id && styles.stationTextActive,
                         ]}
                       >
-                        {st.name.includes('Home') ? '🏠 ' : st.name.includes('Office') ? '🏢 ' : '⚡ '}
                         {st.name}
                       </Text>
                     </TouchableOpacity>
@@ -619,7 +672,10 @@ export function SettingsScreen() {
 
         {/* DISPLAY & PREFERENCES */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>Display & Quiet Hours</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+            <MoonStar size={16} color={Colors.textSecondary} />
+            <Text style={[styles.sectionHeader, { marginBottom: 0 }]}>Display & Quiet Hours</Text>
+          </View>
           <View style={styles.card}>
             {/* AMOLED Theme Switch */}
             <View style={styles.row}>
@@ -680,7 +736,10 @@ export function SettingsScreen() {
 
         {/* DEVELOPER OPTIONS CONFIG */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>🚨 Developer options</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
+            <CodeXml size={16} color={Colors.dangerLight} />
+            <Text style={[styles.sectionHeader, { marginBottom: 0, color: Colors.dangerLight }]}>Developer options</Text>
+          </View>
           <View style={styles.card}>
             {/* Force Test Alarm */}
             <View style={styles.row}>
@@ -719,7 +778,10 @@ export function SettingsScreen() {
                   }
                 }}
               >
-                <Text style={styles.testAlarmBtnText}>Test 🔔</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <BellRing size={14} color={Colors.dangerLight} />
+                  <Text style={styles.testAlarmBtnText}>Test</Text>
+                </View>
               </TouchableOpacity>
             </View>
 
@@ -753,16 +815,22 @@ export function SettingsScreen() {
                         style={[
                           styles.durationButton,
                           devGridRelayStatus === status && styles.durationButtonActive,
+                          { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }
                         ]}
                         onPress={() => setDevGridRelayStatus(status)}
                       >
+                        {status === 'on' ? (
+                          <PlugZap size={14} color={devGridRelayStatus === status ? Colors.textInverse : Colors.success} />
+                        ) : (
+                          <CircleOff size={14} color={devGridRelayStatus === status ? Colors.textInverse : Colors.danger} />
+                        )}
                         <Text
                           style={[
                             styles.durationText,
                             devGridRelayStatus === status && styles.durationTextActive,
                           ]}
                         >
-                          {status === 'on' ? '🔌 Grid On' : '🚫 Grid Off'}
+                          Grid {status === 'on' ? 'On' : 'Off'}
                         </Text>
                       </TouchableOpacity>
                     ))}
@@ -781,16 +849,24 @@ export function SettingsScreen() {
                         style={[
                           styles.durationButton,
                           devBatteryStatus === status && styles.durationButtonActive,
+                          { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }
                         ]}
                         onPress={() => setDevBatteryStatus(status)}
                       >
+                        {status === 'CHARGE' ? (
+                          <BatteryCharging size={14} color={devBatteryStatus === status ? Colors.textInverse : Colors.blue} />
+                        ) : status === 'DISCHARGE' ? (
+                          <Battery size={14} color={devBatteryStatus === status ? Colors.textInverse : Colors.amber} />
+                        ) : (
+                          <Pause size={14} color={devBatteryStatus === status ? Colors.textInverse : Colors.textSecondary} />
+                        )}
                         <Text
                           style={[
                             styles.durationText,
                             devBatteryStatus === status && styles.durationTextActive,
                           ]}
                         >
-                          {status === 'CHARGE' ? '⚡ Charging' : status === 'DISCHARGE' ? '🔋 Discharging' : '⏸️ Idle'}
+                          {status === 'CHARGE' ? 'Charging' : status === 'DISCHARGE' ? 'Discharging' : 'Idle'}
                         </Text>
                       </TouchableOpacity>
                     ))}
@@ -842,6 +918,35 @@ export function SettingsScreen() {
                     />
                   </View>
                 </View>
+
+                {/* Scheduling Overrides */}
+                <View style={styles.separator} />
+                <Text style={styles.rowTitle}>Schedule Event (seconds from now)</Text>
+                
+                <View style={styles.developerInputGrid}>
+                  <View style={styles.devInputCol}>
+                    <Text style={styles.inputLabel}>Power Cut (s)</Text>
+                    <TextInput
+                      style={styles.devTextInput}
+                      value={devScheduledPowerCutSeconds}
+                      onChangeText={setDevScheduledPowerCutSeconds}
+                      keyboardType="numeric"
+                      placeholder="e.g. 15"
+                      placeholderTextColor={Colors.textMuted}
+                    />
+                  </View>
+                  <View style={styles.devInputCol}>
+                    <Text style={styles.inputLabel}>Power On (s)</Text>
+                    <TextInput
+                      style={styles.devTextInput}
+                      value={devScheduledPowerOnSeconds}
+                      onChangeText={setDevScheduledPowerOnSeconds}
+                      keyboardType="numeric"
+                      placeholder="e.g. 30"
+                      placeholderTextColor={Colors.textMuted}
+                    />
+                  </View>
+                </View>
               </View>
             )}
           </View>
@@ -849,7 +954,10 @@ export function SettingsScreen() {
 
         {/* SAVE BUTTON */}
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-          <Text style={styles.saveBtnText}>Save Preferences 💾</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+            <Save size={18} color={Colors.textInverse} />
+            <Text style={styles.saveBtnText}>Save Preferences</Text>
+          </View>
         </TouchableOpacity>
 
         {/* ABOUT ROW */}
@@ -865,7 +973,10 @@ export function SettingsScreen() {
 
         {/* LOGOUT */}
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <Text style={styles.logoutBtnText}>Sign Out of SolarOS</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+            <LogOut size={18} color={Colors.dangerLight} />
+            <Text style={styles.logoutBtnText}>Sign Out of SolarOS</Text>
+          </View>
         </TouchableOpacity>
 
         <Text style={styles.footerDisclaimer}>

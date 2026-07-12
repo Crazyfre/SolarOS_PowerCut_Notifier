@@ -8,6 +8,8 @@ export interface DevOverrides {
   batteryPower?: number;
   pvPower?: number;
   usePower?: number;
+  scheduledPowerCutTime?: number;
+  scheduledPowerOnTime?: number;
 }
 
 const OVERRIDES_KEY = 'sg_dev_overrides';

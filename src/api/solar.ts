@@ -130,7 +130,17 @@ export async function fetchTelemetry(systemId: string): Promise<TelemetryData> {
       batteryPower: data.batteryPower ?? 0, // default if not set
     };
     if (overrides.enabled) {
-      if (overrides.gridRelayStatus !== undefined) mapped.gridRelayStatus = overrides.gridRelayStatus;
+      let activeGridStatus = overrides.gridRelayStatus;
+      const now = Date.now();
+
+      if (overrides.scheduledPowerCutTime && now >= overrides.scheduledPowerCutTime) {
+        activeGridStatus = 'off';
+      }
+      if (overrides.scheduledPowerOnTime && now >= overrides.scheduledPowerOnTime) {
+        activeGridStatus = 'on';
+      }
+
+      if (activeGridStatus !== undefined) mapped.gridRelayStatus = activeGridStatus;
       if (overrides.batterySoc !== undefined) mapped.batterySoc = overrides.batterySoc;
       if (overrides.batteryStatus !== undefined) mapped.batteryStatus = overrides.batteryStatus;
       if (overrides.batteryPower !== undefined) mapped.batteryPower = overrides.batteryPower;
