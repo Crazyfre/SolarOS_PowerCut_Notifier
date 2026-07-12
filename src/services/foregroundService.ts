@@ -8,12 +8,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const MONITORING_CHANNEL_ID = 'solarguard_monitoring_channel';
 const NOTIFICATION_ID = 'solarguard_monitoring';
 const HEARTBEAT_INTERVAL_MS = 30 * 1000; // 30 seconds — keeps Hermes JS thread alive
+const HEARTBEAT_KEY = 'sg_fs_heartbeat';
 let isServiceRunning = false;
 let loopPromiseResolver: (() => void) | null = null;
+let heartbeatToggle = false; // alternates write ↔ delete each tick
 
 /**
  * Sleep for the given number of milliseconds in 30-second heartbeat chunks.
- * Each tick touches AsyncStorage to keep the Android JS thread from being suspended.
+ * Each tick alternates between an AsyncStorage write and delete to keep the
+ * Android JS/Hermes thread active without accumulating any storage.
  * Returns early if the service is stopped mid-sleep.
  */
 async function heartbeatSleep(totalMs: number): Promise<void> {
@@ -29,9 +32,14 @@ async function heartbeatSleep(totalMs: number): Promise<void> {
       };
     });
     if (!isServiceRunning) break;
-    // Heartbeat: lightweight AsyncStorage touch to prove the JS thread is alive
+    // Alternate write ↔ delete: two I/O touches per cycle, zero net storage growth
     try {
-      await AsyncStorage.setItem('sg_fs_heartbeat', String(Date.now()));
+      heartbeatToggle = !heartbeatToggle;
+      if (heartbeatToggle) {
+        await AsyncStorage.setItem(HEARTBEAT_KEY, String(Date.now()));
+      } else {
+        await AsyncStorage.removeItem(HEARTBEAT_KEY);
+      }
     } catch {
       // Non-fatal — just keep going
     }
