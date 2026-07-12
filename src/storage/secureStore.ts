@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Key constants
 const KEYS = {
@@ -6,9 +7,13 @@ const KEYS = {
   ACCESS_TOKEN: 'sg_access_token',
   REFRESH_TOKEN: 'sg_refresh_token',
   SYSTEM_ID: 'sg_system_id',
+  TOKEN_EXPIRY: 'sg_token_expiry',
+} as const;
+
+// Non-sensitive operational state — stored in AsyncStorage (accessible when screen locked)
+const ASYNC_KEYS = {
   LAST_GRID_STATUS: 'sg_last_grid_status',
   OUTAGE_START_TIME: 'sg_outage_start_time',
-  TOKEN_EXPIRY: 'sg_token_expiry',
 } as const;
 
 type StoreKey = typeof KEYS[keyof typeof KEYS];
@@ -60,20 +65,28 @@ export const Store = {
   removeSystemId: () => remove(KEYS.SYSTEM_ID),
 
   // Last known grid status (persisted for background diff)
-  setLastGridStatus: (status: 'on' | 'off') => set(KEYS.LAST_GRID_STATUS, status),
-  getLastGridStatus: () => get(KEYS.LAST_GRID_STATUS) as Promise<'on' | 'off' | null>,
-  removeLastGridStatus: () => remove(KEYS.LAST_GRID_STATUS),
+  // Stored in AsyncStorage (not SecureStore) so it is readable when screen is locked
+  setLastGridStatus: (status: 'on' | 'off') =>
+    AsyncStorage.setItem(ASYNC_KEYS.LAST_GRID_STATUS, status),
+  getLastGridStatus: () =>
+    AsyncStorage.getItem(ASYNC_KEYS.LAST_GRID_STATUS) as Promise<'on' | 'off' | null>,
+  removeLastGridStatus: () =>
+    AsyncStorage.removeItem(ASYNC_KEYS.LAST_GRID_STATUS),
 
   // Outage start time (unix ms as string)
-  setOutageStartTime: (ts: number) => set(KEYS.OUTAGE_START_TIME, String(ts)),
+  // Also in AsyncStorage for the same reason
+  setOutageStartTime: (ts: number) =>
+    AsyncStorage.setItem(ASYNC_KEYS.OUTAGE_START_TIME, String(ts)),
   getOutageStartTime: async () => {
-    const raw = await get(KEYS.OUTAGE_START_TIME);
+    const raw = await AsyncStorage.getItem(ASYNC_KEYS.OUTAGE_START_TIME);
     return raw ? parseInt(raw, 10) : null;
   },
-  removeOutageStartTime: () => remove(KEYS.OUTAGE_START_TIME),
+  removeOutageStartTime: () =>
+    AsyncStorage.removeItem(ASYNC_KEYS.OUTAGE_START_TIME),
 
   // Clear all auth data on logout
   clearAll: async () => {
-    await Promise.all(Object.values(KEYS).map((k) => remove(k)));
+    await Promise.all(Object.values(KEYS).map((k) => SecureStore.deleteItemAsync(k)));
+    await AsyncStorage.multiRemove(Object.values(ASYNC_KEYS));
   },
 };
