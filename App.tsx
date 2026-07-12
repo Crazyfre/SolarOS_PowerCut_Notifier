@@ -230,8 +230,7 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.divider,
     borderTopWidth: 1,
     paddingTop: Spacing.xs,
-    paddingBottom: Spacing.sm,
-    height: 60,
+    paddingBottom: Platform.OS === 'ios' ? Spacing.sm : Spacing.xs,
   },
   tabBarLabel: {
     fontFamily: Typography.fontFamily.medium,
