@@ -52,27 +52,10 @@ jobs:
         working-directory: android
         run: ./gradlew assembleRelease
 
-      # ── 8. Create GitHub Release and Upload APK ───────────────────────────
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+      # ── 8. Upload APK Artifact ────────────────────────────────────────────
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: SolarGuard ${{ github.ref_name }}
-          files: android/app/build/outputs/apk/release/app-release.apk
-          body: |
-            ## SolarGuard ${{ github.ref_name }}
-
-            ### Installing
-            1. Download the `app-debug.apk` file attached below
-            2. Transfer to your Android phone
-            3. Enable "Install from unknown sources" in Settings
-            4. Install the APK
-
-            ### Requirements
-            - Android 8.0+ (API 26+)
-            - SolarOS account with a registered inverter system
-
-          draft: false
-          prerelease: ${{ !startsWith(github.ref_name, 'v') || contains(github.ref_name, '-') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: SolarGuard-APK-${{ github.ref_name || github.sha }}
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 7
