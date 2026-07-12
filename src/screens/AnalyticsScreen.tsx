@@ -1,39 +1,111 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Dimensions } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../theme';
 import { useApp } from '../context/AppContext';
-import Svg, { Rect, G, Line, Circle } from 'react-native-svg';
-import { SunMedium, House, ArrowUpRight, ArrowDownLeft } from 'lucide-react-native';
+import {
+  SunMedium,
+  House,
+  ArrowUpRight,
+  ArrowDownLeft,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Battery,
+} from 'lucide-react-native';
+import { ReportGenerator } from '../services/reportGenerator';
+import { FinancialEngine } from '../services/financialEngine';
+
+/**
+ * MAPPING OF TELEMETRY TO SOLAROS SYSTEM API FIELDS:
+ * 
+ * 1. Today's Statistics:
+ *    - Solar Today: telemetry.generationValue (Today's Solar Generation in kWh)
+ *    - Grid Import: telemetry.buyValue (Today's Grid Energy Imported in kWh)
+ *    - Grid Export: telemetry.gridValue (Today's Energy Exported to Grid in kWh)
+ *    - Consumption: telemetry.useValue (Today's Energy Consumed by house in kWh)
+ *    - Battery Charge: telemetry.chargeValue (Today's Battery Charge Energy in kWh)
+ *    - Battery Discharge: telemetry.dischargeValue (Today's Battery Discharge Energy in kWh)
+ * 
+ * 2. Monthly Statistics:
+ *    - Solar Monthly: telemetry.generationMonth (Monthly Solar Generation in kWh)
+ *    - Grid Import Monthly: telemetry.buyMonth (Monthly Imported Energy in kWh)
+ *    - Grid Export Monthly: telemetry.gridMonth (Monthly Exported Energy in kWh)
+ *    - Consumption Monthly: telemetry.useMonth (Monthly Consumed Energy in kWh)
+ *    - Battery Charge Monthly: telemetry.chargeMonth (Monthly Battery Charge in kWh)
+ *    - Battery Discharge Monthly: telemetry.dischargeMonth (Monthly Battery Discharge in kWh)
+ * 
+ * 3. Lifetime Statistics:
+ *    - Solar Lifetime: telemetry.generationTotal (Total Solar Energy Generated in kWh)
+ *    - Grid Import Lifetime: telemetry.buyTotal (Total Grid Energy Imported in kWh)
+ *    - Grid Export Lifetime: telemetry.gridTotal (Total Energy Exported to Grid in kWh)
+ *    - Consumption Lifetime: telemetry.useTotal (Total Energy Consumed in kWh)
+ *    - Battery Charge Lifetime: telemetry.chargeTotal (Total Battery Charge Energy in kWh)
+ *    - Battery Discharge Lifetime: telemetry.dischargeTotal (Total Battery Discharge Energy in kWh)
+ */
+
+interface MetricCardProps {
+  title: string;
+  value: string;
+  icon: React.ReactNode;
+  color: string;
+  isAmoled: boolean;
+}
+
+function MetricCard({ title, value, icon, color, isAmoled }: MetricCardProps) {
+  return (
+    <View style={[styles.metricCard, isAmoled && styles.cardAmoled, { borderLeftColor: color }]}>
+      <View style={styles.metricCardHeader}>
+        {icon}
+        <Text style={styles.metricCardTitle}>{title}</Text>
+      </View>
+      <Text style={[styles.metricCardValue, { color }]}>{value}</Text>
+    </View>
+  );
+}
 
 export function AnalyticsScreen() {
   const { settings, telemetry } = useApp();
+  const [isGenerating, setIsGenerating] = useState(false);
+  
+  // Collapsible accordion states
+  const [todayExpanded, setTodayExpanded] = useState(true);
+  const [monthlyExpanded, setMonthlyExpanded] = useState(false);
+  const [lifetimeExpanded, setLifetimeExpanded] = useState(false);
+
   const isAmoled = settings?.amoledTheme ?? false;
 
-  const formatPower = (watts: number) => {
-    return `${Math.round(watts)} W`;
+  const formatKwh = (val?: number) => {
+    if (val === undefined || val === null) return '0.0 kWh';
+    return `${val.toFixed(1)} kWh`;
   };
 
-  const formatKwh = (val: number) => `${val.toFixed(1)} kWh`;
+  // Run background Financial Engine calculations
+  useEffect(() => {
+    if (telemetry) {
+      const importRate = settings?.tariffImportRate ?? 7.5;
+      const exportRate = settings?.tariffExportRate ?? 5.0;
+      const summary = FinancialEngine.summarize(telemetry, importRate, exportRate);
+      
+      console.log('[FinancialEngine] Telemetry update calculated:');
+      console.log(' - Today Savings:', summary.today.netSavings.toFixed(2), 'INR');
+      console.log(' - Month Savings:', summary.monthly.netSavings.toFixed(2), 'INR');
+      console.log(' - Lifetime Savings:', summary.lifetime.netSavings.toFixed(2), 'INR');
+    }
+  }, [telemetry, settings]);
 
-  // Dynamic daily stats from telemetry API
-  const dailySolar = telemetry?.generationValue ?? 8.5;
-  const dailyHouse = telemetry?.useValue ?? 4.2;
-  const dailyExport = telemetry?.gridValue ?? 3.7;
-  const dailyImport = telemetry?.buyValue ?? 0.4;
-
-  // Weekly averages
-  const avgLoad = 380;
-  const avgExport = 1200;
-  const solarPeak = 4820;
-
-  // Battery usage cycles: calculated from daily charge/discharge values divided by double capacity
-  const batteryCapacity = settings?.batteryCapacity ?? 5.12;
-  const totalCharged = telemetry?.chargeValue ?? 4.6;
-  const totalDischarged = telemetry?.dischargeValue ?? 4.6;
-  const batteryUsage = (telemetry?.chargeValue !== undefined && telemetry?.dischargeValue !== undefined)
-    ? Number(((telemetry.chargeValue + telemetry.dischargeValue) / (2 * batteryCapacity)).toFixed(2))
-    : 1.8; // default fallback cycles
+  const handleDownloadReport = async () => {
+    setIsGenerating(true);
+    try {
+      // Station name falls back gracefully if not configured
+      const stationName = settings?.activeStationId ? `Station ${settings.activeStationId}` : 'SolarGuard Plant';
+      await ReportGenerator.generateAndShareMonthlyReport(telemetry, settings, stationName);
+    } catch (err: any) {
+      Alert.alert('Export Failed', err?.message || 'Unable to generate monthly report.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   return (
     <SafeAreaView style={[styles.root, isAmoled && { backgroundColor: '#000000' }]} edges={['top']}>
@@ -43,78 +115,205 @@ export function AnalyticsScreen() {
           <Text style={styles.headerSub}>Energy generation & usage insights</Text>
         </View>
 
-        {/* DAILY SUMMARY */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Daily Summary (Today)</Text>
-          <View style={[styles.card, isAmoled && styles.cardAmoled]}>
-            <View style={styles.metricRow}>
-              <View style={styles.metricItem}>
-                <SunMedium size={24} color={Colors.amberLight} style={{ marginBottom: 4 }} />
-                <Text style={styles.metricLabel}>Solar Generated</Text>
-                <Text style={[styles.metricValue, { color: Colors.amberLight }]}>{formatKwh(dailySolar)}</Text>
-              </View>
-              <View style={styles.metricItem}>
-                <House size={24} color={Colors.amber} style={{ marginBottom: 4 }} />
-                <Text style={styles.metricLabel}>House Used</Text>
-                <Text style={[styles.metricValue, { color: Colors.amber }]}>{formatKwh(dailyHouse)}</Text>
-              </View>
-            </View>
+        {/* PDF Download Trigger */}
+        <TouchableOpacity
+          style={[styles.downloadBtn, isGenerating && { opacity: 0.7 }]}
+          onPress={handleDownloadReport}
+          disabled={isGenerating}
+          activeOpacity={0.8}
+        >
+          {isGenerating ? (
+            <ActivityIndicator color={Colors.textInverse} size="small" />
+          ) : (
+            <Download size={18} color={Colors.textInverse} />
+          )}
+          <Text style={styles.downloadBtnText}>
+            {isGenerating ? 'Compiling Report...' : 'Download Monthly Report'}
+          </Text>
+        </TouchableOpacity>
 
-            <View style={styles.separator} />
+        {/* 1. TODAY'S STATISTICS SECTION */}
+        <TouchableOpacity
+          style={[styles.accordionHeader, isAmoled && styles.accordionHeaderAmoled]}
+          onPress={() => setTodayExpanded(!todayExpanded)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.accordionHeaderText}>Today's Statistics</Text>
+          {todayExpanded ? (
+            <ChevronUp size={20} color={Colors.textSecondary} />
+          ) : (
+            <ChevronDown size={20} color={Colors.textSecondary} />
+          )}
+        </TouchableOpacity>
 
-            <View style={styles.metricRow}>
-              <View style={styles.metricItem}>
-                <ArrowUpRight size={24} color={Colors.success} style={{ marginBottom: 4 }} />
-                <Text style={styles.metricLabel}>Exported to Grid</Text>
-                <Text style={[styles.metricValue, { color: Colors.success }]}>{formatKwh(dailyExport)}</Text>
-              </View>
-              <View style={styles.metricItem}>
-                <ArrowDownLeft size={24} color={Colors.danger} style={{ marginBottom: 4 }} />
-                <Text style={styles.metricLabel}>Imported from Grid</Text>
-                <Text style={[styles.metricValue, { color: Colors.danger }]}>{formatKwh(dailyImport)}</Text>
-              </View>
-            </View>
+        {todayExpanded && (
+          <View style={styles.gridContainer}>
+            <MetricCard
+              title="Solar Generated"
+              value={formatKwh(telemetry?.generationValue)}
+              icon={<SunMedium size={18} color={Colors.amberLight} />}
+              color={Colors.amberLight}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Grid Imported"
+              value={formatKwh(telemetry?.buyValue)}
+              icon={<ArrowDownLeft size={18} color={Colors.danger} />}
+              color={Colors.danger}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Grid Exported"
+              value={formatKwh(telemetry?.gridValue)}
+              icon={<ArrowUpRight size={18} color={Colors.success} />}
+              color={Colors.success}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="House Consumed"
+              value={formatKwh(telemetry?.useValue)}
+              icon={<House size={18} color={Colors.blueLight} />}
+              color={Colors.blueLight}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Battery Charged"
+              value={formatKwh(telemetry?.chargeValue)}
+              icon={<Battery size={18} color="#8B5CF6" />}
+              color="#8B5CF6"
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Battery Discharged"
+              value={formatKwh(telemetry?.dischargeValue)}
+              icon={<Battery size={18} color="#EC4899" />}
+              color="#EC4899"
+              isAmoled={isAmoled}
+            />
           </View>
-        </View>
+        )}
 
-        {/* WEEKLY METRICS */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Weekly Insights</Text>
-          <View style={[styles.card, isAmoled && styles.cardAmoled]}>
-            <View style={styles.statRow}>
-              <Text style={styles.statLabel}>Average Load</Text>
-              <Text style={styles.statValue}>{formatPower(avgLoad)}</Text>
-            </View>
-            <View style={styles.separator} />
-            <View style={styles.statRow}>
-              <Text style={styles.statLabel}>Average Export</Text>
-              <Text style={styles.statValue}>{formatPower(avgExport)}</Text>
-            </View>
-            <View style={styles.separator} />
-            <View style={styles.statRow}>
-              <Text style={styles.statLabel}>Solar Peak Power</Text>
-              <Text style={styles.statValue}>{formatPower(solarPeak)}</Text>
-            </View>
-            <View style={styles.separator} />
-            <View style={styles.statRow}>
-              <Text style={styles.statLabel}>Battery Usage (Cycles)</Text>
-              <Text style={styles.statValue}>{batteryUsage} cycles</Text>
-            </View>
-          </View>
-        </View>
+        {/* 2. MONTHLY STATISTICS SECTION */}
+        <TouchableOpacity
+          style={[styles.accordionHeader, isAmoled && styles.accordionHeaderAmoled, { marginTop: Spacing.sm }]}
+          onPress={() => setMonthlyExpanded(!monthlyExpanded)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.accordionHeaderText}>Monthly Summary</Text>
+          {monthlyExpanded ? (
+            <ChevronUp size={20} color={Colors.textSecondary} />
+          ) : (
+            <ChevronDown size={20} color={Colors.textSecondary} />
+          )}
+        </TouchableOpacity>
 
-        {/* PERFORMANCE MINI-BARS */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Self-Sufficiency</Text>
-          <View style={[styles.card, isAmoled && styles.cardAmoled]}>
-            <Text style={styles.sufficiencyTitle}>Solar Coverage</Text>
-            <Text style={styles.sufficiencySub}>How much of your energy came directly from solar</Text>
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: '85%', backgroundColor: Colors.success }]} />
-            </View>
-            <Text style={styles.progressPercent}>85% Self-Sufficient</Text>
+        {monthlyExpanded && (
+          <View style={styles.gridContainer}>
+            <MetricCard
+              title="Solar Generated"
+              value={formatKwh(telemetry?.generationMonth)}
+              icon={<SunMedium size={18} color={Colors.amberLight} />}
+              color={Colors.amberLight}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Grid Imported"
+              value={formatKwh(telemetry?.buyMonth)}
+              icon={<ArrowDownLeft size={18} color={Colors.danger} />}
+              color={Colors.danger}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Grid Exported"
+              value={formatKwh(telemetry?.gridMonth)}
+              icon={<ArrowUpRight size={18} color={Colors.success} />}
+              color={Colors.success}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Energy Consumed"
+              value={formatKwh(telemetry?.useMonth)}
+              icon={<House size={18} color={Colors.blueLight} />}
+              color={Colors.blueLight}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Battery Charged"
+              value={formatKwh(telemetry?.chargeMonth)}
+              icon={<Battery size={18} color="#8B5CF6" />}
+              color="#8B5CF6"
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Battery Discharged"
+              value={formatKwh(telemetry?.dischargeMonth)}
+              icon={<Battery size={18} color="#EC4899" />}
+              color="#EC4899"
+              isAmoled={isAmoled}
+            />
           </View>
-        </View>
+        )}
+
+        {/* 3. LIFETIME STATISTICS SECTION */}
+        <TouchableOpacity
+          style={[styles.accordionHeader, isAmoled && styles.accordionHeaderAmoled, { marginTop: Spacing.sm }]}
+          onPress={() => setLifetimeExpanded(!lifetimeExpanded)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.accordionHeaderText}>Lifetime Statistics</Text>
+          {lifetimeExpanded ? (
+            <ChevronUp size={20} color={Colors.textSecondary} />
+          ) : (
+            <ChevronDown size={20} color={Colors.textSecondary} />
+          )}
+        </TouchableOpacity>
+
+        {lifetimeExpanded && (
+          <View style={styles.gridContainer}>
+            <MetricCard
+              title="Solar Generated"
+              value={formatKwh(telemetry?.generationTotal)}
+              icon={<SunMedium size={18} color={Colors.amberLight} />}
+              color={Colors.amberLight}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Grid Imported"
+              value={formatKwh(telemetry?.buyTotal)}
+              icon={<ArrowDownLeft size={18} color={Colors.danger} />}
+              color={Colors.danger}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Grid Exported"
+              value={formatKwh(telemetry?.gridTotal)}
+              icon={<ArrowUpRight size={18} color={Colors.success} />}
+              color={Colors.success}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Total Consumed"
+              value={formatKwh(telemetry?.useTotal)}
+              icon={<House size={18} color={Colors.blueLight} />}
+              color={Colors.blueLight}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Battery Charged"
+              value={formatKwh(telemetry?.chargeTotal)}
+              icon={<Battery size={18} color="#8B5CF6" />}
+              color="#8B5CF6"
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Battery Discharged"
+              value={formatKwh(telemetry?.dischargeTotal)}
+              icon={<Battery size={18} color="#EC4899" />}
+              color="#EC4899"
+              isAmoled={isAmoled}
+            />
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -133,7 +332,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xl,
     borderBottomWidth: 1,
     borderBottomColor: Colors.divider,
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.lg,
   },
   headerTitle: {
     fontFamily: Typography.fontFamily.bold,
@@ -146,98 +345,85 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     marginTop: 2,
   },
-  section: {
+  downloadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.amber,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.md,
     marginBottom: Spacing.xl,
+    ...Shadows.amber,
   },
-  sectionTitle: {
+  downloadBtnText: {
     fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: Spacing.sm,
+    fontSize: Typography.fontSize.base,
+    color: Colors.textInverse,
   },
-  card: {
+  accordionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
     backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.xl,
+    borderRadius: BorderRadius.lg,
     borderWidth: 1,
     borderColor: Colors.glassBorder,
-    padding: Spacing.lg,
+    marginBottom: Spacing.sm,
+    ...Shadows.card,
+  },
+  accordionHeaderAmoled: {
+    backgroundColor: '#000000',
+    borderColor: '#222',
+  },
+  accordionHeaderText: {
+    fontFamily: Typography.fontFamily.bold,
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textPrimary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  gridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.lg,
+  },
+  metricCard: {
+    width: '48%',
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    borderLeftWidth: 4,
+    padding: Spacing.md,
+    marginBottom: Spacing.xs,
     ...Shadows.card,
   },
   cardAmoled: {
     backgroundColor: '#000000',
     borderColor: '#222',
   },
-  metricRow: {
+  metricCardHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: Spacing.sm,
-  },
-  metricItem: {
-    flex: 1,
     alignItems: 'center',
+    gap: Spacing.xs,
+    marginBottom: Spacing.xs,
   },
-  metricIcon: {
-    fontSize: 20,
-    marginBottom: 4,
-  },
-  metricLabel: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.xs,
+  metricCardTitle: {
+    fontFamily: Typography.fontFamily.bold,
+    fontSize: 9,
     color: Colors.textMuted,
-    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
-  metricValue: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.lg,
-  },
-  separator: {
-    height: 1,
-    backgroundColor: Colors.divider,
-    marginVertical: Spacing.xs,
-  },
-  statRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: Spacing.sm,
-  },
-  statLabel: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
-  },
-  statValue: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.textPrimary,
-  },
-  sufficiencyTitle: {
+  metricCardValue: {
     fontFamily: Typography.fontFamily.bold,
     fontSize: Typography.fontSize.base,
-    color: Colors.textPrimary,
-  },
-  sufficiencySub: {
-    fontFamily: Typography.fontFamily.regular,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textMuted,
-    marginBottom: Spacing.md,
-  },
-  progressTrack: {
-    height: 8,
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  progressPercent: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.success,
-    marginTop: Spacing.sm,
-    textAlign: 'right',
+    marginTop: 2,
   },
 });

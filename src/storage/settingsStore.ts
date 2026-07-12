@@ -22,6 +22,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   quietHoursEnabled: false,
   amoledTheme: false,
   foregroundServiceEnabled: false,
+  tariffImportRate: 7.50,
+  tariffExportRate: 5.00,
 };
 
 export const SettingsStore = {

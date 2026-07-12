@@ -89,6 +89,10 @@ export interface AppSettings {
   quietHoursEnabled: boolean;
   amoledTheme: boolean;
   foregroundServiceEnabled: boolean;
+  
+  // Tariffs
+  tariffImportRate?: number;
+  tariffExportRate?: number;
 }
 
 export interface AppState {

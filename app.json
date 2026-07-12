@@ -58,7 +58,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#0A0E1A"
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "extra": {
       "apiBaseUrl": "https://eu1.solaros.com",

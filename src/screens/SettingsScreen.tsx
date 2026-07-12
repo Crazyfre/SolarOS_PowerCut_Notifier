@@ -90,6 +90,8 @@ export function SettingsScreen() {
   const [batteryCapacity, setBatteryCapacity] = useState(String(settings.batteryCapacity ?? 5.12));
   const [refreshInterval, setRefreshInterval] = useState(settings.refreshIntervalMinutes ?? 5);
   const [amoledTheme, setAmoledTheme] = useState(settings.amoledTheme ?? false);
+  const [tariffImportRate, setTariffImportRate] = useState(String(settings.tariffImportRate ?? 7.50));
+  const [tariffExportRate, setTariffExportRate] = useState(String(settings.tariffExportRate ?? 5.00));
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(settings.quietHoursEnabled ?? false);
   const [quietHoursStart, setQuietHoursStart] = useState(settings.quietHoursStart ?? '23:00');
   const [quietHoursEnd, setQuietHoursEnd] = useState(settings.quietHoursEnd ?? '07:00');
@@ -242,6 +244,18 @@ export function SettingsScreen() {
       return;
     }
 
+    const importRateNum = parseFloat(tariffImportRate);
+    if (isNaN(importRateNum) || importRateNum < 0) {
+      Alert.alert('Invalid Input', 'Import tariff must be a non-negative number.');
+      return;
+    }
+
+    const exportRateNum = parseFloat(tariffExportRate);
+    if (isNaN(exportRateNum) || exportRateNum < 0) {
+      Alert.alert('Invalid Input', 'Export tariff must be a non-negative number.');
+      return;
+    }
+
     const updated = {
       alarmDurationSeconds: alarmDuration,
       useAlarmSound,
@@ -261,6 +275,8 @@ export function SettingsScreen() {
       quietHoursEnabled,
       amoledTheme,
       foregroundServiceEnabled,
+      tariffImportRate: importRateNum,
+      tariffExportRate: exportRateNum,
     };
 
     if (activeStationId) {
@@ -695,6 +711,45 @@ export function SettingsScreen() {
                   placeholder="5.12"
                 />
                 <Text style={styles.capacityUnit}>kWh</Text>
+              </View>
+            </View>
+
+            <View style={styles.separator} />
+
+            {/* Electricity Tariffs */}
+            <View style={styles.row}>
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowTitle}>Import Tariff</Text>
+                <Text style={styles.rowSub}>Electricity cost from grid (₹/kWh)</Text>
+              </View>
+              <View style={styles.capacityInputContainer}>
+                <TextInput
+                  style={styles.capacityInput}
+                  value={tariffImportRate}
+                  onChangeText={setTariffImportRate}
+                  keyboardType="numeric"
+                  placeholder="7.50"
+                />
+                <Text style={styles.capacityUnit}>₹</Text>
+              </View>
+            </View>
+
+            <View style={styles.separator} />
+
+            <View style={styles.row}>
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowTitle}>Export Tariff</Text>
+                <Text style={styles.rowSub}>Feed-in rate credit to grid (₹/kWh)</Text>
+              </View>
+              <View style={styles.capacityInputContainer}>
+                <TextInput
+                  style={styles.capacityInput}
+                  value={tariffExportRate}
+                  onChangeText={setTariffExportRate}
+                  keyboardType="numeric"
+                  placeholder="5.00"
+                />
+                <Text style={styles.capacityUnit}>₹</Text>
               </View>
             </View>
 
