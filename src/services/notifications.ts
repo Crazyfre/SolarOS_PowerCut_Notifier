@@ -57,41 +57,41 @@ export async function registerNotificationChannels(): Promise<void> {
     });
 
     // 4. Power Cut Alarms (Default/legacy channel, custom alarm sound)
-    await Notifications.setNotificationChannelAsync('solarguard_alarm', {
+    await Notifications.setNotificationChannelAsync('solarguard_alarm_v2', {
       name: 'Power Cut Alarms (Default)',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 500, 250, 500, 250, 500],
       lightColor: '#EF4444',
-      sound: 'alarm',
+      sound: 'alarm.wav',
     });
 
     // 5. Silent Power Cut Alarms (Default/legacy channel, custom alarm sound, no popup)
-    await Notifications.setNotificationChannelAsync('solarguard_silent_alarm', {
+    await Notifications.setNotificationChannelAsync('solarguard_silent_alarm_v2', {
       name: 'Silent Power Cut Alarms (Default)',
       importance: Notifications.AndroidImportance.DEFAULT,
       vibrationPattern: [0, 500, 250, 500],
       lightColor: '#EF4444',
-      sound: 'alarm',
+      sound: 'alarm.wav',
     });
 
     // 6. Register specific channels for each customizable alarm sound
     for (const option of ALARM_SOUND_OPTIONS) {
       // Standard channel (Max importance, alert banner popup)
-      await Notifications.setNotificationChannelAsync(`sg_alarm_${option.id}`, {
+      await Notifications.setNotificationChannelAsync(`sg_alarm_v2_${option.id}`, {
         name: `Power Cut Alarm (${option.name})`,
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 500, 250, 500, 250, 500],
         lightColor: '#EF4444',
-        sound: option.id, // Android resource name without extension
+        sound: option.file, // Android resource name WITH extension
       });
 
       // Silent/No-Popup channel (Default importance, keeps sound)
-      await Notifications.setNotificationChannelAsync(`sg_silent_alarm_${option.id}`, {
+      await Notifications.setNotificationChannelAsync(`sg_silent_alarm_v2_${option.id}`, {
         name: `Silent Alarm (${option.name})`,
         importance: Notifications.AndroidImportance.DEFAULT,
         vibrationPattern: [0, 500, 250, 500],
         lightColor: '#EF4444',
-        sound: option.id,
+        sound: option.file,
       });
     }
   }
@@ -145,7 +145,7 @@ function getNotificationRouting(
   if (useAlarm) {
     const option = ALARM_SOUND_OPTIONS.find(o => o.id === soundId) ?? ALARM_SOUND_OPTIONS[0];
     return {
-      channelId: noPopup ? `sg_silent_alarm_${soundId}` : `sg_alarm_${soundId}`,
+      channelId: noPopup ? `sg_silent_alarm_v2_${soundId}` : `sg_alarm_v2_${soundId}`,
       sound: Platform.OS === 'ios' ? option.file : true,
     };
   }
