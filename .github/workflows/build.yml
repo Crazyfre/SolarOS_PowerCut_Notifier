@@ -1,10 +1,11 @@
 name: Build & Release SolarGuard APK
 
 on:
-  # Trigger on version tags like v1.0.0, v1.2.3
+  # Trigger on version tags like v1.0.0, v1.2.3, or release-v2.2.5
   push:
     tags:
       - 'v*.*.*'
+      - 'release-v*.*.*'
 
   # Also allow manual trigger from GitHub Actions UI
   workflow_dispatch:
@@ -52,10 +53,25 @@ jobs:
         working-directory: android
         run: ./gradlew assembleRelease
 
-      # ── 8. Upload APK Artifact ────────────────────────────────────────────
+      # ── 8. Upload APK Artifact (Private) ──────────────────────────────────
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: SolarGuard-APK-${{ github.ref_name || github.sha }}
           path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 7
+
+      # ── 9. Create Public GitHub Release ───────────────────────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref_name, 'release-')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SolarGuard ${{ github.ref_name }}
+          files: android/app/build/outputs/apk/release/app-release.apk
+          body: |
+            ## SolarGuard ${{ github.ref_name }}
+            Official public release of SolarGuard.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
