@@ -182,20 +182,14 @@ export async function sendPowerCutNotification(
   if (Platform.OS === 'android' && settings.useAlarmSound) {
     try {
       const soundId = settings.alarmSoundName ?? 'alarm';
-      OutageAlarm.triggerAlarm(soundId, settings.alarmDurationSeconds);
+      OutageAlarm.triggerAlarm({
+        reason: 'POWER_CUT',
+        sound: soundId,
+        duration: settings.alarmDurationSeconds
+      });
     } catch (err) {
       console.warn('Failed to trigger native alarm:', err);
     }
-  }
-
-  if (id && settings.alarmDurationSeconds > 0) {
-    setTimeout(async () => {
-      try {
-        await Notifications.dismissNotificationAsync(id);
-      } catch (err) {
-        console.warn('Failed to dismiss notification:', err);
-      }
-    }, settings.alarmDurationSeconds * 1000);
   }
 }
 
@@ -274,20 +268,14 @@ export async function sendBatteryCriticalNotification(
   if (Platform.OS === 'android' && settings.useAlarmSound) {
     try {
       const soundId = settings.alarmSoundName ?? 'alarm';
-      OutageAlarm.triggerAlarm(soundId, settings.alarmDurationSeconds);
+      OutageAlarm.triggerAlarm({
+        reason: 'BATTERY_CRITICAL',
+        sound: soundId,
+        duration: settings.alarmDurationSeconds
+      });
     } catch (err) {
       console.warn('Failed to trigger native alarm:', err);
     }
-  }
-
-  if (id && settings.alarmDurationSeconds > 0) {
-    setTimeout(async () => {
-      try {
-        await Notifications.dismissNotificationAsync(id);
-      } catch (err) {
-        console.warn('Failed to dismiss notification:', err);
-      }
-    }, settings.alarmDurationSeconds * 1000);
   }
 }
 
@@ -359,20 +347,14 @@ export async function sendTestNotification(
   if (Platform.OS === 'android' && settings.useAlarmSound) {
     try {
       const soundId = settings.alarmSoundName ?? 'alarm';
-      OutageAlarm.triggerAlarm(soundId, settings.alarmDurationSeconds);
+      OutageAlarm.triggerAlarm({
+        reason: 'ALARM_TEST',
+        sound: soundId,
+        duration: settings.alarmDurationSeconds
+      });
     } catch (err) {
       console.warn('Failed to trigger native alarm:', err);
     }
-  }
-
-  if (id && settings.alarmDurationSeconds > 0) {
-    setTimeout(async () => {
-      try {
-        await Notifications.dismissNotificationAsync(id);
-      } catch (err) {
-        console.warn('Failed to dismiss notification:', err);
-      }
-    }, settings.alarmDurationSeconds * 1000);
   }
 }
 

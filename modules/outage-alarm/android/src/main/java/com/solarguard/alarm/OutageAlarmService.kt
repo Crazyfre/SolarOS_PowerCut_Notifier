@@ -7,49 +7,77 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.media.MediaPlayer
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 
+enum class AlarmState {
+    IDLE,
+    STARTING,
+    PLAYING,
+    STOPPING
+}
+
 class OutageAlarmService : Service() {
 
-    private var mediaPlayer: MediaPlayer? = null
+    private var alarmPlayer: AlarmPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private val handler = Handler(Looper.getMainLooper())
     private var stopRunnable: Runnable? = null
 
     companion object {
+        private const val TAG = "SolarGuardAlarm"
         private const val NOTIFICATION_ID = 9110
-        private const val CHANNEL_ID = "solarguard_native_alarm_channel_v2"
+        private const val CHANNEL_ID = "solarguard_native_alarm_channel_v3"
         private const val CHANNEL_NAME = "SolarGuard Native Alarms"
         
         const val ACTION_START = "com.solarguard.alarm.ACTION_START"
         const val ACTION_STOP = "com.solarguard.alarm.ACTION_STOP"
         
+        const val EXTRA_REASON = "extra_reason"
         const val EXTRA_SOUND_NAME = "extra_sound_name"
         const val EXTRA_DURATION = "extra_duration"
 
+        private const val COOLDOWN_MS = 60000L
+
         @Volatile
-        var isPlaying: Boolean = false
+        var currentState: AlarmState = AlarmState.IDLE
             private set
 
-        fun start(context: Context, soundName: String, durationSeconds: Int) {
+        @Volatile
+        private var lastTriggerTime: Long = 0
+
+        val isPlaying: Boolean
+            get() = currentState == AlarmState.PLAYING
+
+        fun start(context: Context, reason: String, soundName: String, durationSeconds: Int) {
+            val now = System.currentTimeMillis()
+            
+            if (currentState != AlarmState.IDLE) {
+                Log.d(TAG, "[Alarm Ignored] Reason: Already Running (State: $currentState)")
+                return
+            }
+
+            if (now - lastTriggerTime < COOLDOWN_MS) {
+                val elapsed = now - lastTriggerTime
+                Log.d(TAG, "[Alarm Ignored] Reason: Cooldown Active (Elapsed: ${elapsed / 1000}s / ${COOLDOWN_MS / 1000}s)")
+                return
+            }
+
+            lastTriggerTime = now
+
             val intent = Intent(context, OutageAlarmService::class.java).apply {
                 action = ACTION_START
+                putExtra(EXTRA_REASON, reason)
                 putExtra(EXTRA_SOUND_NAME, soundName)
                 putExtra(EXTRA_DURATION, durationSeconds)
             }
-            if (isPlaying) {
-                // If already playing, update settings/duration without restarting foreground service
-                context.startService(intent)
-                return
-            }
+            
             ContextCompat.startForegroundService(context, intent)
         }
 
@@ -66,37 +94,60 @@ class OutageAlarmService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         if (action == ACTION_STOP) {
+            Log.d(TAG, "[Alarm Dismissed] Stop action requested.")
             shutdown()
             return START_NOT_STICKY
         }
 
         if (action == ACTION_START) {
+            val reason = intent.getStringExtra(EXTRA_REASON) ?: "Unknown"
             val soundName = intent.getStringExtra(EXTRA_SOUND_NAME) ?: "alarm"
             val durationSeconds = intent.getIntExtra(EXTRA_DURATION, 10)
-            
-            if (isPlaying) {
-                scheduleAutoStop(durationSeconds)
-                return START_STICKY
-            }
 
-            isPlaying = true
-            acquireWakeLock()
+            currentState = AlarmState.STARTING
+            Log.d(TAG, "[Alarm Started] Reason: $reason, Sound: $soundName, Duration: ${durationSeconds}s")
+
             startForegroundNotification()
-            playAlarmSound(soundName)
-            scheduleAutoStop(durationSeconds)
+
+            alarmPlayer = AlarmPlayer(this)
+            val success = alarmPlayer?.play(soundName) ?: false
+
+            if (success) {
+                currentState = AlarmState.PLAYING
+                acquireWakeLock(durationSeconds)
+                scheduleAutoStop(durationSeconds)
+            } else {
+                Log.e(TAG, "[Alarm Failed] Failed to initiate audio playback.")
+                shutdown()
+            }
         }
 
         return START_STICKY
     }
 
-    private fun acquireWakeLock() {
+    private fun acquireWakeLock(durationSeconds: Int) {
         try {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val timeoutMs = (durationSeconds + 5) * 1000L
             wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SolarGuard::AlarmWakeLock").apply {
-                acquire(10 * 60 * 1000L) // Max 10 minutes
+                acquire(timeoutMs)
             }
         } catch (e: Exception) {
-            // Ignore
+            Log.e(TAG, "Failed to acquire WakeLock", e)
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            wakeLock?.apply {
+                if (isHeld) {
+                    release()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to release WakeLock", e)
+        } finally {
+            wakeLock = null
         }
     }
 
@@ -161,7 +212,7 @@ class OutageAlarmService : Service() {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Emergency alarms for SolarGuard power cuts"
-                setSound(null, null) // Silent channel: MediaPlayer plays sound explicitly
+                setSound(null, null)
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 500, 250, 500)
             }
@@ -170,39 +221,11 @@ class OutageAlarmService : Service() {
         }
     }
 
-    private fun playAlarmSound(soundName: String) {
-        try {
-            val resId = resources.getIdentifier(soundName, "raw", packageName)
-            if (resId == 0) {
-                val fallbackId = resources.getIdentifier("alarm", "raw", packageName)
-                if (fallbackId != 0) {
-                    initMediaPlayer(fallbackId)
-                }
-                return
-            }
-            initMediaPlayer(resId)
-        } catch (e: Exception) {
-            // Ignore
-        }
-    }
-
-    private fun initMediaPlayer(resId: Int) {
-        mediaPlayer = MediaPlayer.create(this, resId).apply {
-            isLooping = true
-            setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
-            start()
-        }
-    }
-
     private fun scheduleAutoStop(durationSeconds: Int) {
         stopRunnable?.let { handler.removeCallbacks(it) }
 
         val runnable = Runnable {
+            Log.d(TAG, "[Alarm Auto-Stopped] Duration elapsed.")
             shutdown()
         }
         stopRunnable = runnable
@@ -210,38 +233,32 @@ class OutageAlarmService : Service() {
     }
 
     private fun shutdown() {
-        isPlaying = false
-        
+        if (currentState == AlarmState.IDLE || currentState == AlarmState.STOPPING) {
+            return
+        }
+
+        currentState = AlarmState.STOPPING
+
+        releaseWakeLock()
+
         try {
-            mediaPlayer?.apply {
-                if (isPlaying) {
-                    stop()
-                }
-                release()
-            }
-            mediaPlayer = null
+            alarmPlayer?.stop()
         } catch (e: Exception) {
             // Ignore
+        } finally {
+            alarmPlayer = null
         }
 
         stopRunnable?.let { handler.removeCallbacks(it) }
 
-        try {
-            wakeLock?.apply {
-                if (isHeld) {
-                    release()
-                }
-            }
-            wakeLock = null
-        } catch (e: Exception) {
-            // Ignore
-        }
-
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+
+        currentState = AlarmState.IDLE
     }
 
     override fun onDestroy() {
+        Log.d(TAG, "[Alarm Service Destroyed]")
         shutdown()
         super.onDestroy()
     }

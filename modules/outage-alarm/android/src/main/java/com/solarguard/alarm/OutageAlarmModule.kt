@@ -2,14 +2,27 @@ package com.solarguard.alarm
 
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.records.Field
+import expo.modules.kotlin.records.Record
+
+class TriggerOptions : Record {
+  @Field
+  val reason: String = ""
+
+  @Field
+  val sound: String = ""
+
+  @Field
+  val duration: Int = 10
+}
 
 class OutageAlarmModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("OutageAlarm")
 
-    Function("triggerAlarm") { soundName: String, durationSeconds: Int ->
+    Function("triggerAlarm") { options: TriggerOptions ->
       val context = appContext.reactContext ?: return@Function
-      OutageAlarmService.start(context, soundName, durationSeconds)
+      OutageAlarmService.start(context, options.reason, options.sound, options.duration)
     }
 
     Function("stopAlarm") {
