@@ -163,17 +163,17 @@ export function AnalyticsScreen() {
               isAmoled={isAmoled}
             />
             <MetricCard
-              title="Grid Imported"
-              value={formatKwh(telemetry?.buyValue)}
-              icon={<ArrowDownLeft size={18} color={Colors.danger} />}
-              color={Colors.danger}
-              isAmoled={isAmoled}
-            />
-            <MetricCard
               title="Grid Exported"
               value={formatKwh(telemetry?.gridValue)}
               icon={<ArrowUpRight size={18} color={Colors.success} />}
               color={Colors.success}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Grid Imported"
+              value={formatKwh(telemetry?.buyValue)}
+              icon={<ArrowDownLeft size={18} color={Colors.danger} />}
+              color={Colors.danger}
               isAmoled={isAmoled}
             />
             <MetricCard
@@ -224,17 +224,17 @@ export function AnalyticsScreen() {
               isAmoled={isAmoled}
             />
             <MetricCard
-              title="Grid Imported"
-              value={formatKwh(telemetry?.buyMonth)}
-              icon={<ArrowDownLeft size={18} color={Colors.danger} />}
-              color={Colors.danger}
-              isAmoled={isAmoled}
-            />
-            <MetricCard
               title="Grid Exported"
               value={formatKwh(telemetry?.gridMonth)}
               icon={<ArrowUpRight size={18} color={Colors.success} />}
               color={Colors.success}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Grid Imported"
+              value={formatKwh(telemetry?.buyMonth)}
+              icon={<ArrowDownLeft size={18} color={Colors.danger} />}
+              color={Colors.danger}
               isAmoled={isAmoled}
             />
             <MetricCard
@@ -285,17 +285,17 @@ export function AnalyticsScreen() {
               isAmoled={isAmoled}
             />
             <MetricCard
-              title="Grid Imported"
-              value={formatKwh(telemetry?.buyTotal)}
-              icon={<ArrowDownLeft size={18} color={Colors.danger} />}
-              color={Colors.danger}
-              isAmoled={isAmoled}
-            />
-            <MetricCard
               title="Grid Exported"
               value={formatKwh(telemetry?.gridTotal)}
               icon={<ArrowUpRight size={18} color={Colors.success} />}
               color={Colors.success}
+              isAmoled={isAmoled}
+            />
+            <MetricCard
+              title="Grid Imported"
+              value={formatKwh(telemetry?.buyTotal)}
+              icon={<ArrowDownLeft size={18} color={Colors.danger} />}
+              color={Colors.danger}
               isAmoled={isAmoled}
             />
             <MetricCard
