@@ -78,7 +78,7 @@ class OutageAlarmService : Service() {
                 putExtra(EXTRA_DURATION, durationSeconds)
             }
             
-            ContextCompat.startForegroundService(context, intent)
+            context.startService(intent)
         }
 
         fun stop(context: Context) {
@@ -116,7 +116,7 @@ class OutageAlarmService : Service() {
             currentState = AlarmState.STARTING
             Log.d(TAG, "[Alarm Triggered] Reason: $reason, Sound: $soundName, Duration: ${durationSeconds}s")
 
-            startForegroundNotification()
+            showNotification()
 
             alarmPlayer = AlarmPlayer(this)
             val success = alarmPlayer?.play(soundName) ?: false
@@ -163,7 +163,7 @@ class OutageAlarmService : Service() {
         }
     }
 
-    private fun startForegroundNotification() {
+    private fun showNotification() {
         createNotificationChannel()
 
         val dismissIntent = Intent(this, OutageAlarmService::class.java).apply {
@@ -205,15 +205,8 @@ class OutageAlarmService : Service() {
             )
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID, 
-                notification, 
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID, notification)
     }
 
     private fun createNotificationChannel() {
@@ -263,7 +256,8 @@ class OutageAlarmService : Service() {
 
         stopRunnable?.let { handler.removeCallbacks(it) }
 
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(NOTIFICATION_ID)
         stopSelf()
 
         currentState = AlarmState.IDLE
