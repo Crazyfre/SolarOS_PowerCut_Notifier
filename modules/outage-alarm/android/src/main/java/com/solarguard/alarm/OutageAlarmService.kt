@@ -82,10 +82,13 @@ class OutageAlarmService : Service() {
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, OutageAlarmService::class.java).apply {
-                action = ACTION_STOP
+            try {
+                Log.d(TAG, "[Alarm Dismissed] Stop requested.")
+                val intent = Intent(context, OutageAlarmService::class.java)
+                context.stopService(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to stop OutageAlarmService", e)
             }
-            context.startService(intent)
         }
     }
 
@@ -93,6 +96,12 @@ class OutageAlarmService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
+        if (action == null) {
+            Log.w(TAG, "[Unexpected Shutdown/Restart] Service started with null intent or action. Shutting down service.")
+            shutdown()
+            return START_NOT_STICKY
+        }
+
         if (action == ACTION_STOP) {
             Log.d(TAG, "[Alarm Dismissed] Stop action requested.")
             shutdown()
@@ -105,7 +114,7 @@ class OutageAlarmService : Service() {
             val durationSeconds = intent.getIntExtra(EXTRA_DURATION, 10)
 
             currentState = AlarmState.STARTING
-            Log.d(TAG, "[Alarm Started] Reason: $reason, Sound: $soundName, Duration: ${durationSeconds}s")
+            Log.d(TAG, "[Alarm Triggered] Reason: $reason, Sound: $soundName, Duration: ${durationSeconds}s")
 
             startForegroundNotification()
 
@@ -120,9 +129,12 @@ class OutageAlarmService : Service() {
                 Log.e(TAG, "[Alarm Failed] Failed to initiate audio playback.")
                 shutdown()
             }
+        } else {
+            Log.w(TAG, "[Invalid Intent Received] Unknown action: $action. Shutting down service.")
+            shutdown()
         }
 
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun acquireWakeLock(durationSeconds: Int) {

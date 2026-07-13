@@ -7,42 +7,39 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const MONITORING_CHANNEL_ID = 'solarguard_monitoring_channel';
 const NOTIFICATION_ID = 'solarguard_monitoring';
-const HEARTBEAT_INTERVAL_MS = 30 * 1000; // 30 seconds — keeps Hermes JS thread alive
-const HEARTBEAT_KEY = 'sg_fs_heartbeat';
+
 let isServiceRunning = false;
 let loopPromiseResolver: (() => void) | null = null;
-let heartbeatToggle = false; // alternates write ↔ delete each tick
+let activeTimer: ReturnType<typeof setTimeout> | null = null;
+let sleepResolver: (() => void) | null = null;
 
 /**
- * Sleep for the given number of milliseconds in 30-second heartbeat chunks.
- * Each tick alternates between an AsyncStorage write and delete to keep the
- * Android JS/Hermes thread active without accumulating any storage.
- * Returns early if the service is stopped mid-sleep.
+ * Cancelable sleep using standard setTimeout.
+ * Resolves immediately if the service is stopped or aborted.
  */
-async function heartbeatSleep(totalMs: number): Promise<void> {
-  const end = Date.now() + totalMs;
-  while (isServiceRunning && Date.now() < end) {
-    const remaining = end - Date.now();
-    const tick = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
-    await new Promise<void>((r) => {
-      const timer = setTimeout(r, tick);
-      ForegroundServiceManager._abortSleep = () => {
-        clearTimeout(timer);
-        r();
-      };
-    });
-    if (!isServiceRunning) break;
-    // Alternate write ↔ delete: two I/O touches per cycle, zero net storage growth
-    try {
-      heartbeatToggle = !heartbeatToggle;
-      if (heartbeatToggle) {
-        await AsyncStorage.setItem(HEARTBEAT_KEY, String(Date.now()));
-      } else {
-        await AsyncStorage.removeItem(HEARTBEAT_KEY);
-      }
-    } catch {
-      // Non-fatal — just keep going
-    }
+async function cancelableSleep(ms: number): Promise<void> {
+  if (!isServiceRunning) return;
+  await new Promise<void>((resolve) => {
+    sleepResolver = resolve;
+    activeTimer = setTimeout(() => {
+      activeTimer = null;
+      sleepResolver = null;
+      resolve();
+    }, ms);
+  });
+}
+
+/**
+ * Abort any active sleep timer and resolve the sleep promise immediately.
+ */
+function abortSleep(): void {
+  if (activeTimer) {
+    clearTimeout(activeTimer);
+    activeTimer = null;
+  }
+  if (sleepResolver) {
+    sleepResolver();
+    sleepResolver = null;
   }
 }
 
@@ -63,7 +60,7 @@ notifee.registerForegroundService(() => {
   return new Promise<void>((resolve) => {
     isServiceRunning = true;
     loopPromiseResolver = resolve;
-    console.log('[ForegroundService] Started loop.');
+    console.log('[ForegroundService] Service Started.');
 
     // Execute loop asynchronously
     (async () => {
@@ -71,10 +68,10 @@ notifee.registerForegroundService(() => {
         try {
           const systemId = await Store.getSystemId();
           if (!systemId) {
-            console.log('[ForegroundService] No System ID active. Waiting 1 minute...');
+            console.warn('[ForegroundService] No System ID active. Waiting 1 minute...');
             await updateDiagnostic('sg_fs_state', 'Error / Retrying');
             await updateDiagnostic('sg_fs_last_result', 'Authentication Error');
-            await heartbeatSleep(60 * 1000);
+            await cancelableSleep(60 * 1000);
             continue;
           }
 
@@ -82,13 +79,22 @@ notifee.registerForegroundService(() => {
           
           await updateDiagnostic('sg_fs_state', 'Polling');
 
+          console.log('[ForegroundService] Poll Started.');
+          const pollStart = Date.now();
+
           // Fetch fresh telemetry data from SolarOS with custom errors
           let telemetry;
           try {
             telemetry = await fetchTelemetry(systemId);
+            const duration = Date.now() - pollStart;
+            console.log(`[ForegroundService] Poll Completed. HTTP Duration: ${duration}ms`);
+            
             await updateDiagnostic('sg_fs_last_result', 'Success');
             await updateDiagnostic('sg_fs_state', 'Waiting for Next Poll');
           } catch (err: any) {
+            const duration = Date.now() - pollStart;
+            console.warn(`[ForegroundService] Poll Failed. HTTP Duration: ${duration}ms. Error:`, err);
+            
             const errorMsg = err?.message || String(err);
             let resultType: 'Success' | 'Network Error' | 'Authentication Error' | 'API Error' = 'API Error';
             if (errorMsg === 'AUTH_REQUIRED') {
@@ -132,7 +138,7 @@ notifee.registerForegroundService(() => {
             },
           });
 
-          // Sleep using heartbeat chunks to keep the JS thread warm
+          // Sleep until the next poll cycle
           const refreshMinutes = settings.refreshIntervalMinutes ?? 5;
           const delayMs = Math.max(1, refreshMinutes) * 60 * 1000;
           
@@ -140,11 +146,11 @@ notifee.registerForegroundService(() => {
           await updateDiagnostic('sg_fs_last_poll', String(now));
           await updateDiagnostic('sg_fs_next_poll', String(now + delayMs));
 
-          await heartbeatSleep(delayMs);
+          await cancelableSleep(delayMs);
 
         } catch (error: any) {
-          console.warn('[ForegroundService] Loop error:', error);
-          
+          // If we reach here, telemetry fetch or state analysis failed.
+          // We keep the foreground service running and retry after the configured interval.
           const isAuthError = error?.message === 'AUTH_REQUIRED';
           const errorBody = isAuthError 
             ? 'Monitoring Paused · Login Required' 
@@ -172,11 +178,11 @@ notifee.registerForegroundService(() => {
           const delayMs = isAuthError ? 5 * 60 * 1000 : 60 * 1000;
           await updateDiagnostic('sg_fs_next_poll', String(now + delayMs));
 
-          await heartbeatSleep(delayMs);
+          await cancelableSleep(delayMs);
         }
       }
 
-      console.log('[ForegroundService] Exiting loop.');
+      console.log('[ForegroundService] Service Stopped.');
       if (loopPromiseResolver) {
         loopPromiseResolver();
         loopPromiseResolver = null;
@@ -186,12 +192,15 @@ notifee.registerForegroundService(() => {
 });
 
 export const ForegroundServiceManager = {
-  _abortSleep: null as (() => void) | null,
-
   /**
    * Start the persistent foreground service
    */
   async startService(): Promise<void> {
+    if (isServiceRunning) {
+      console.log('[ForegroundService] Service already running. Ignoring duplicate start request.');
+      return;
+    }
+
     // Create the notification channel
     await notifee.createChannel({
       id: MONITORING_CHANNEL_ID,
@@ -224,11 +233,9 @@ export const ForegroundServiceManager = {
    * Stop the persistent foreground service
    */
   async stopService(): Promise<void> {
+    if (!isServiceRunning) return;
     isServiceRunning = false;
-    if (this._abortSleep) {
-      this._abortSleep();
-      this._abortSleep = null;
-    }
+    abortSleep();
     await notifee.stopForegroundService();
   },
 
