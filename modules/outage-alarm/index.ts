@@ -4,6 +4,7 @@ export interface OutageAlarmOptions {
   reason: string;
   sound: string;
   duration: number;
+  triggerTime?: number;
 }
 
 interface OutageAlarmModuleType {

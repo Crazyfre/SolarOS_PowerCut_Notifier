@@ -185,7 +185,8 @@ export async function sendPowerCutNotification(
       OutageAlarm.triggerAlarm({
         reason: 'POWER_CUT',
         sound: soundId,
-        duration: settings.alarmDurationSeconds
+        duration: settings.alarmDurationSeconds,
+        triggerTime: Date.now(),
       });
     } catch (err) {
       console.warn('Failed to trigger native alarm:', err);
@@ -213,6 +214,7 @@ export async function sendGridRestoredNotification(
           reason: 'GRID_RESTORED',
           sound: 'chime',
           duration: 5,
+          triggerTime: Date.now(),
         });
       }
     } catch (err) {
@@ -278,7 +280,8 @@ export async function sendBatteryCriticalNotification(
       OutageAlarm.triggerAlarm({
         reason: 'BATTERY_CRITICAL',
         sound: soundId,
-        duration: settings.alarmDurationSeconds
+        duration: settings.alarmDurationSeconds,
+        triggerTime: Date.now(),
       });
     } catch (err) {
       console.warn('Failed to trigger native alarm:', err);
@@ -357,7 +360,8 @@ export async function sendTestNotification(
       OutageAlarm.triggerAlarm({
         reason: 'ALARM_TEST',
         sound: soundId,
-        duration: settings.alarmDurationSeconds
+        duration: settings.alarmDurationSeconds,
+        triggerTime: Date.now(),
       });
     } catch (err) {
       console.warn('Failed to trigger native alarm:', err);

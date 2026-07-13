@@ -55,7 +55,9 @@ class OutageAlarmService : Service() {
         val isPlaying: Boolean
             get() = currentState == AlarmState.PLAYING
 
-        fun start(context: Context, reason: String, soundName: String, durationSeconds: Int) {
+        const val EXTRA_TRIGGER_TIME = "extra_trigger_time"
+
+        fun start(context: Context, reason: String, soundName: String, durationSeconds: Int, triggerTime: Long) {
             val now = System.currentTimeMillis()
             
             if (currentState != AlarmState.IDLE) {
@@ -76,6 +78,7 @@ class OutageAlarmService : Service() {
                 putExtra(EXTRA_REASON, reason)
                 putExtra(EXTRA_SOUND_NAME, soundName)
                 putExtra(EXTRA_DURATION, durationSeconds)
+                putExtra(EXTRA_TRIGGER_TIME, triggerTime)
             }
             
             context.startService(intent)
@@ -95,6 +98,8 @@ class OutageAlarmService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val entryTime = System.currentTimeMillis()
+        val threadName = Thread.currentThread().name
         val action = intent?.action
         if (action == null) {
             Log.w(TAG, "[Unexpected Shutdown/Restart] Service started with null intent or action. Shutting down service.")
@@ -103,7 +108,7 @@ class OutageAlarmService : Service() {
         }
 
         if (action == ACTION_STOP) {
-            Log.d(TAG, "[Alarm Dismissed] Stop action requested.")
+            Log.d(TAG, "[Alarm Dismissed] Stop action requested on thread: $threadName.")
             shutdown()
             return START_NOT_STICKY
         }
@@ -112,14 +117,21 @@ class OutageAlarmService : Service() {
             val reason = intent.getStringExtra(EXTRA_REASON) ?: "Unknown"
             val soundName = intent.getStringExtra(EXTRA_SOUND_NAME) ?: "alarm"
             val durationSeconds = intent.getIntExtra(EXTRA_DURATION, 10)
+            val triggerTime = intent.getLongExtra(EXTRA_TRIGGER_TIME, 0L)
+
+            val latency = entryTime - triggerTime
+            Log.d(TAG, "[Service] onStartCommand entered on thread: $threadName. Time since JS trigger: ${latency}ms")
 
             currentState = AlarmState.STARTING
             Log.d(TAG, "[Alarm Triggered] Reason: $reason, Sound: $soundName, Duration: ${durationSeconds}s")
 
+            val notifStart = System.currentTimeMillis()
             showNotification()
+            val notifDuration = System.currentTimeMillis() - notifStart
+            Log.d(TAG, "[Service] showNotification completed on thread: $threadName. Duration: ${notifDuration}ms")
 
-            alarmPlayer = AlarmPlayer(this)
-            val success = alarmPlayer?.play(soundName) ?: false
+            alarmPlayer = AlarmPlayer.getInstance(applicationContext)
+            val success = alarmPlayer?.play(soundName, triggerTime) ?: false
 
             if (success) {
                 currentState = AlarmState.PLAYING

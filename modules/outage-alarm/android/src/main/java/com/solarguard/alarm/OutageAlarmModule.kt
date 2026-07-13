@@ -17,6 +17,9 @@ class TriggerOptions : Record {
 
   @Field
   val duration: Int = 10
+
+  @Field
+  val triggerTime: Long = 0L
 }
 
 class OutageAlarmModule : Module() {
@@ -24,8 +27,12 @@ class OutageAlarmModule : Module() {
     Name("OutageAlarm")
 
     Function("triggerAlarm") { options: TriggerOptions ->
+      val now = System.currentTimeMillis()
+      val threadName = Thread.currentThread().name
+      val bridgeLatency = now - options.triggerTime
+      android.util.Log.d("SolarGuardAlarm", "[NativeModule] triggerAlarm called on thread: $threadName. Time since JS trigger: ${bridgeLatency}ms")
       appContext.reactContext?.let { context ->
-        OutageAlarmService.start(context, options.reason, options.sound, options.duration)
+        OutageAlarmService.start(context, options.reason, options.sound, options.duration, options.triggerTime)
       }
     }
 
