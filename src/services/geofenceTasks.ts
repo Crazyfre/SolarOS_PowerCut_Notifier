@@ -38,36 +38,12 @@ export async function shouldRemotePoll(): Promise<boolean> {
 }
 
 /**
- * ENTER/EXIT headless task. Android spins up the process and TaskManager
- * boots a headless JS context to execute this — even when the app was killed.
+ * Shared ENTER/EXIT transition handler. Called by:
+ *  - the real headless geofence task (Play Services fence events), and
+ *  - the Developer Options geofence simulator (same code path, so tests
+ *    exercise exactly what production runs).
  */
-async function geofenceTaskExecutor({
-  data,
-  error,
-}: TaskManager.TaskManagerTaskBody<{
-  eventType: number;
-  region?: { identifier?: string; latitude?: number; longitude?: number };
-}>): Promise<void> {
-  if (error) {
-    console.warn('[GeofenceTask] Error:', error.message);
-    await GeofenceStore.recordEvent({
-      kind: 'ERROR',
-      at: Date.now(),
-      detail: error.message,
-    });
-    return;
-  }
-
-  const eventType = data?.eventType;
-  const region = data?.region;
-
-  const isEnter = eventType === LocationGeofencingEventType.Enter;
-
-  console.log(
-    `[GeofenceTask] ${isEnter ? 'ENTER' : 'EXIT'} event at ${Date.now()}` +
-      (region ? ` (${region.identifier})` : '')
-  );
-
+export async function handleGeofenceTransition(isEnter: boolean): Promise<void> {
   if (isEnter) {
     await GeofenceStore.setState({ inside: true, lastTransitionAt: Date.now() });
     await GeofenceStore.recordEvent({ kind: 'ENTER', at: Date.now() });
@@ -102,6 +78,40 @@ async function geofenceTaskExecutor({
       console.warn('[GeofenceTask] EXIT -> FGS stop failed:', err);
     }
   }
+}
+
+/**
+ * ENTER/EXIT headless task. Android spins up the process and TaskManager
+ * boots a headless JS context to execute this — even when the app was killed.
+ */
+async function geofenceTaskExecutor({
+  data,
+  error,
+}: TaskManager.TaskManagerTaskBody<{
+  eventType: number;
+  region?: { identifier?: string; latitude?: number; longitude?: number };
+}>): Promise<void> {
+  if (error) {
+    console.warn('[GeofenceTask] Error:', error.message);
+    await GeofenceStore.recordEvent({
+      kind: 'ERROR',
+      at: Date.now(),
+      detail: error.message,
+    });
+    return;
+  }
+
+  const eventType = data?.eventType;
+  const region = data?.region;
+
+  const isEnter = eventType === LocationGeofencingEventType.Enter;
+
+  console.log(
+    `[GeofenceTask] ${isEnter ? 'ENTER' : 'EXIT'} event at ${Date.now()}` +
+      (region ? ` (${region.identifier})` : '')
+  );
+
+  await handleGeofenceTransition(isEnter);
 }
 
 TaskManager.defineTask(GEOFENCE_TASK, geofenceTaskExecutor);

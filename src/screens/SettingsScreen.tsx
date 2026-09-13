@@ -71,6 +71,7 @@ import {
   armRemotePolling,
   disarmRemotePolling,
 } from '../services/geofenceService';
+import { handleGeofenceTransition } from '../services/geofenceTasks';
 import { GeofenceStore } from '../storage/geofenceStore';
 import type { MonitoringMode, HomeZone } from '../types/telemetry';
 
@@ -101,6 +102,8 @@ export function SettingsScreen() {
   const [devUsePower, setDevUsePower] = useState('0');
   const [devScheduledPowerCutSeconds, setDevScheduledPowerCutSeconds] = useState('0');
   const [devScheduledPowerOnSeconds, setDevScheduledPowerOnSeconds] = useState('0');
+  const [devMockPositionLat, setDevMockPositionLat] = useState('');
+  const [devMockPositionLng, setDevMockPositionLng] = useState('');
 
   const [useAlarmSound, setUseAlarmSound] = useState(settings.useAlarmSound);
   const [alarmDuration, setAlarmDuration] = useState(settings.alarmDurationSeconds);
@@ -216,6 +219,10 @@ export function SettingsScreen() {
         const now = Date.now();
         setDevScheduledPowerCutSeconds(cutTime > now ? String(Math.round((cutTime - now) / 1000)) : '0');
         setDevScheduledPowerOnSeconds(onTime > now ? String(Math.round((onTime - now) / 1000)) : '0');
+        if (overrides.mockPosition) {
+          setDevMockPositionLat(String(overrides.mockPosition.lat));
+          setDevMockPositionLng(String(overrides.mockPosition.lng));
+        }
       } catch (err) {
         console.warn('Failed to load developer overrides:', err);
       }
@@ -384,6 +391,15 @@ export function SettingsScreen() {
     const onSecs = parseInt(devScheduledPowerOnSeconds, 10);
     const now = Date.now();
 
+    // Mock position: only persisted when both fields parse to valid numbers
+    const mockLat = parseFloat(devMockPositionLat);
+    const mockLng = parseFloat(devMockPositionLng);
+    const hasMockPosition =
+      devMockPositionLat.trim() !== '' &&
+      devMockPositionLng.trim() !== '' &&
+      !isNaN(mockLat) && mockLat >= -90 && mockLat <= 90 &&
+      !isNaN(mockLng) && mockLng >= -180 && mockLng <= 180;
+
     const overrides = {
       enabled: devOverridesEnabled,
       gridRelayStatus: devGridRelayStatus,
@@ -394,6 +410,7 @@ export function SettingsScreen() {
       usePower: isNaN(useVal) ? 0 : useVal,
       scheduledPowerCutTime: (!isNaN(cutSecs) && cutSecs > 0) ? (now + cutSecs * 1000) : undefined,
       scheduledPowerOnTime: (!isNaN(onSecs) && onSecs > 0) ? (now + onSecs * 1000) : undefined,
+      mockPosition: hasMockPosition ? { lat: mockLat, lng: mockLng } : undefined,
     };
 
     await DevOverridesStore.saveOverrides(overrides);
@@ -1047,6 +1064,102 @@ export function SettingsScreen() {
                   </View>
                 </View>
               ) : null}
+            </Card>
+
+            {/* Geofence Simulator — exercise the location-aware pipeline
+                without physically moving. ENTER/EXIT buttons run the exact
+                same handler the real headless fence task uses. */}
+            <Card style={{ marginTop: Spacing.md }}>
+              <SettingRow
+                title="Geofence Simulator"
+                subtitle="Simulate ENTER/EXIT transitions (runs the real geofence handler)"
+              >
+                <Badge label={geofenceRegistered ? 'Fence armed' : 'No fence'} tone={geofenceRegistered ? 'success' : 'warning'} />
+              </SettingRow>
+
+              <View style={styles.devInputGrid}>
+                <Button
+                  label="Simulate ENTER"
+                  size="sm"
+                  variant="secondary"
+                  icon={<MapPin size={14} color={colors.success} strokeWidth={2} />}
+                  onPress={async () => {
+                    try {
+                      await handleGeofenceTransition(true);
+                      const geo = await GeofenceStore.getState();
+                      setZoneStatus(geo.inside === true ? 'Inside home zone' : 'Unknown');
+                      const ev = await GeofenceStore.getLastEvent();
+                      if (ev) setZoneLastEvent(`Simulated enter at ${new Date(ev.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+                      Alert.alert('Simulated ENTER', 'The monitoring service has been started as if you walked into your home zone. Sirens are now live.');
+                    } catch (err) {
+                      Alert.alert('Error', 'Failed to simulate ENTER. Check that a home zone is configured.');
+                    }
+                  }}
+                />
+                <Button
+                  label="Simulate EXIT"
+                  size="sm"
+                  variant="secondary"
+                  icon={<CircleOff size={14} color={colors.danger} strokeWidth={2} />}
+                  onPress={async () => {
+                    try {
+                      await handleGeofenceTransition(false);
+                      const geo = await GeofenceStore.getState();
+                      setZoneStatus(geo.inside === false ? 'Outside home zone' : 'Unknown');
+                      const ev = await GeofenceStore.getLastEvent();
+                      if (ev) setZoneLastEvent(`Simulated exit at ${new Date(ev.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+                      Alert.alert('Simulated EXIT', 'A final remote poll ran and the monitoring service was stopped, as if you left your home zone. Alarms are now notification-only.');
+                    } catch (err) {
+                      Alert.alert('Error', 'Failed to simulate EXIT.');
+                    }
+                  }}
+                />
+              </View>
+
+              <RowDivider />
+
+              <SettingRow
+                title="Mock Device Position"
+                subtitle="Overrides GPS for in-app zone verification (used by the fence self-healing check)"
+              >
+                <Button
+                  label={homeZone ? 'Set to zone center' : 'Set'}
+                  size="sm"
+                  variant="secondary"
+                  onPress={() => {
+                    if (homeZone) {
+                      setDevMockPositionLat(String(homeZone.lat));
+                      setDevMockPositionLng(String(homeZone.lng));
+                    } else if (zoneLat && zoneLng) {
+                      setDevMockPositionLat(zoneLat);
+                      setDevMockPositionLng(zoneLng);
+                    } else {
+                      Alert.alert('No Zone', 'Save a home zone first (or enter coordinates above) to use this shortcut.');
+                    }
+                  }}
+                />
+              </SettingRow>
+              <View style={styles.devInputGrid}>
+                <Input
+                  label="Mock Latitude"
+                  value={devMockPositionLat}
+                  onChangeText={setDevMockPositionLat}
+                  keyboardType="numeric"
+                  placeholder="e.g. 12.9716"
+                  accessibilityLabel="Mock device latitude"
+                />
+                <Input
+                  label="Mock Longitude"
+                  value={devMockPositionLng}
+                  onChangeText={setDevMockPositionLng}
+                  keyboardType="numeric"
+                  placeholder="e.g. 77.5946"
+                  accessibilityLabel="Mock device longitude"
+                />
+              </View>
+              <Text style={[styles.zoneHint, { color: colors.textDisabled, marginTop: Spacing.xs }]}>
+                Requires Mock Telemetry Overrides to be ON and saved. Set the position outside your zone radius, then watch the next poll cycle correct a "missed EXIT".
+              </Text>
             </Card>
           </View>
         ) : null}

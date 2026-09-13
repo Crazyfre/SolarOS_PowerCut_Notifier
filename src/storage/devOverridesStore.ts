@@ -10,6 +10,8 @@ export interface DevOverrides {
   usePower?: number;
   scheduledPowerCutTime?: number;
   scheduledPowerOnTime?: number;
+  /** Simulated device position for geofence testing (bypasses real GPS). */
+  mockPosition?: { lat: number; lng: number };
 }
 
 const OVERRIDES_KEY = 'sg_dev_overrides';

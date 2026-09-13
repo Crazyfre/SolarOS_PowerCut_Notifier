@@ -3,6 +3,7 @@ import * as Location from 'expo-location';
 import * as BackgroundFetch from 'expo-background-fetch';
 import { AppSettings, HomeZone } from '../types/telemetry';
 import { GeofenceStore, isInsideZone } from '../storage/geofenceStore';
+import { DevOverridesStore } from '../storage/devOverridesStore';
 import { GEOFENCE_TASK, GEOFENCE_REMOTE_POLL_TASK } from './geofenceTasks';
 
 export const MIN_ZONE_RADIUS_METERS = 100;
@@ -194,11 +195,17 @@ export async function shouldPlaySiren(settings: AppSettings): Promise<boolean> {
  * One fused-location sanity sample to verify we are truly inside the zone.
  * Used defensively by the FGS poll loop (missed-EXIT self-healing).
  * Returns null when unavailable; caller treats null as "cannot verify".
+ * Honors the Developer Options mock position when overrides are enabled.
  */
 export async function verifyInsideZone(
   zone: HomeZone
 ): Promise<boolean | null> {
   try {
+    const overrides = await DevOverridesStore.getOverrides();
+    if (overrides.enabled && overrides.mockPosition) {
+      const { lat, lng } = overrides.mockPosition;
+      return isInsideZone(zone, lat, lng);
+    }
     const pos = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.Balanced,
       timeInterval: 1000,
