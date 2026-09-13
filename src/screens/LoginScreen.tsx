@@ -2,21 +2,18 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
-  TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   ActivityIndicator,
-  Modal,
-  FlatList,
 } from 'react-native';
-import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../theme';
+import { useTheme, Typography, Spacing, PAGE_GUTTER } from '../theme';
 import { loginWithPassword } from '../api/auth';
 import { fetchStations } from '../api/solar';
 import { useApp } from '../context/AppContext';
 import { requestNotificationPermissions } from '../services/notifications';
+import { Button, Input, Sheet, SheetRowProps, Badge } from '../components/ui';
 import {
   SunMedium,
   TriangleAlert,
@@ -25,6 +22,9 @@ import {
   Battery,
   ChartColumn,
   Bell,
+  House,
+  Building2,
+  Check,
 } from 'lucide-react-native';
 
 interface Station {
@@ -32,53 +32,11 @@ interface Station {
   name: string;
 }
 
-// ─── Station Picker Modal ─────────────────────────────────────────────────────
-
-function StationPickerModal({
-  stations,
-  onSelect,
-  onCancel,
-}: {
-  stations: Station[];
-  onSelect: (station: Station) => void;
-  onCancel: () => void;
-}) {
-  return (
-    <Modal transparent animationType="fade" onRequestClose={onCancel}>
-      <View style={pickerStyles.overlay}>
-        <View style={pickerStyles.sheet}>
-          <Text style={pickerStyles.title}>Select Your Station</Text>
-          <Text style={pickerStyles.subtitle}>
-            Multiple stations found on your account
-          </Text>
-          <FlatList
-            data={stations}
-            keyExtractor={(s) => s.id}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={pickerStyles.stationItem}
-                onPress={() => onSelect(item)}
-                accessibilityLabel={`Select station ${item.name}`}
-              >
-                <Text style={pickerStyles.stationName}>{item.name}</Text>
-                <Text style={pickerStyles.stationId}>ID: {item.id}</Text>
-              </TouchableOpacity>
-            )}
-            ItemSeparatorComponent={() => <View style={pickerStyles.separator} />}
-          />
-          <TouchableOpacity style={pickerStyles.cancelBtn} onPress={onCancel}>
-            <Text style={pickerStyles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
 // ─── Login Screen ─────────────────────────────────────────────────────────────
 
 export function LoginScreen() {
   const { login } = useApp();
+  const { colors } = useTheme();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -121,11 +79,9 @@ export function LoginScreen() {
     setError(null);
 
     try {
-      // Step 1: Authenticate
       setLoadingStep('Authenticating…');
       const tokens = await loginWithPassword(email.trim(), password);
 
-      // Step 2: Discover stations via confirmed endpoint
       setLoadingStep('Finding your station…');
       const stations = await fetchStations(tokens.access_token);
 
@@ -139,10 +95,8 @@ export function LoginScreen() {
       }
 
       if (stations.length === 1) {
-        // Only one station — proceed automatically
         await completeLogin(tokens, stations[0].id);
       } else {
-        // Multiple stations — show picker
         setPendingTokens(tokens);
         setPendingStations(stations);
         setIsLoading(false);
@@ -165,10 +119,25 @@ export function LoginScreen() {
     }
   };
 
+  const stationIcon = (name: string) => {
+    if (name.includes('Home')) return <House size={20} color={colors.brand} strokeWidth={2} />;
+    if (name.includes('Office')) return <Building2 size={20} color={colors.brand} strokeWidth={2} />;
+    return <Zap size={20} color={colors.brand} strokeWidth={2} />;
+  };
+
+  const sheetRows: SheetRowProps[] = pendingStations.map((s) => ({
+    title: s.name,
+    subtitle: `ID: ${s.id}`,
+    icon: stationIcon(s.name),
+    onPress: () => {
+      if (pendingTokens) completeLogin(pendingTokens, s.id);
+    },
+  }));
+
   return (
     <>
       <KeyboardAvoidingView
-        style={styles.root}
+        style={[styles.root, { backgroundColor: colors.background }]}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
@@ -179,92 +148,89 @@ export function LoginScreen() {
           {/* Logo / Header */}
           <View style={styles.heroSection}>
             <View style={styles.logoContainer}>
-              <SunMedium size={72} color={Colors.amber} />
-              <View style={styles.logoGlow} />
+              <View style={[styles.logoGlow, { backgroundColor: 'rgba(245,166,35,0.14)' }]} />
+              <SunMedium size={64} color={colors.brand} strokeWidth={1.8} />
             </View>
-            <Text style={styles.appName}>SolarGuard</Text>
-            <Text style={styles.tagline}>Solar Power Cut Detection & Monitoring</Text>
+            <Text style={[styles.appName, { color: colors.textPrimary }]}>SolarGuard</Text>
+            <Text style={[styles.tagline, { color: colors.textSecondary }]}>
+              Solar Power Cut Detection & Monitoring
+            </Text>
           </View>
 
           {/* Login Card */}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Connect to SolarOS</Text>
-            <Text style={styles.cardSubtitle}>
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: colors.surface1, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Connect to SolarOS</Text>
+            <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
               Sign in with your SolarOS account credentials
             </Text>
 
-            {/* Email */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Email Address</Text>
-              <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="you@example.com"
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!isLoading}
-                accessibilityLabel="Email address input"
-                testID="email-input"
-              />
-            </View>
+            <Input
+              label="Email Address"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@example.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!isLoading}
+              accessibilityLabel="Email address input"
+              testID="email-input"
+              style={{ marginBottom: Spacing.base }}
+            />
 
-            {/* Password */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Password</Text>
-              <TextInput
-                style={styles.input}
-                value={password}
-                onChangeText={setPassword}
-                placeholder="••••••••"
-                placeholderTextColor={Colors.textMuted}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!isLoading}
-                accessibilityLabel="Password input"
-                testID="password-input"
-              />
-            </View>
+            <Input
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
+              placeholder="••••••••"
+              placeholderTextColor={colors.textDisabled}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!isLoading}
+              accessibilityLabel="Password input"
+              testID="password-input"
+            />
 
             {/* Error */}
             {error ? (
-              <View style={[styles.errorBox, { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm }]}>
-                <TriangleAlert size={18} color={Colors.dangerLight} />
-                <Text style={[styles.errorText, { flex: 1 }]}>{error}</Text>
+              <View
+                style={[
+                  styles.errorBox,
+                  { backgroundColor: colors.dangerFill, borderColor: colors.dangerBorder },
+                ]}
+              >
+                <TriangleAlert size={16} color={colors.dangerText} strokeWidth={2} />
+                <Text style={[styles.errorText, { color: colors.dangerText }]}>{error}</Text>
               </View>
             ) : null}
 
             {/* Connect button */}
-            <TouchableOpacity
-              style={[styles.button, isLoading && styles.buttonDisabled]}
-              onPress={handleLogin}
-              disabled={isLoading}
-              activeOpacity={0.8}
-              accessibilityLabel="Connect to SolarOS"
-              testID="login-button"
-            >
-              {isLoading ? (
-                <View style={styles.loadingRow}>
-                  <ActivityIndicator color={Colors.textInverse} size="small" />
-                  <Text style={[styles.buttonText, { marginLeft: Spacing.sm }]}>
-                    {loadingStep}
-                  </Text>
-                </View>
-              ) : (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, justifyContent: 'center' }}>
-                  <Text style={styles.buttonText}>Connect</Text>
-                  <Zap size={16} color={Colors.textInverse} />
-                </View>
-              )}
-            </TouchableOpacity>
+            {isLoading ? (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator color={colors.brand} size="small" />
+                <Text style={[styles.loadingStep, { color: colors.textSecondary }]}>{loadingStep}</Text>
+              </View>
+            ) : (
+              <Button
+                label="Connect"
+                onPress={handleLogin}
+                icon={<Zap size={16} color={colors.textInverse} strokeWidth={2} />}
+                full
+                accessibilityLabel="Connect to SolarOS"
+                testID="login-button"
+              />
+            )}
 
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, marginTop: Spacing.md }}>
-              <Lock size={12} color={Colors.textMuted} />
-              <Text style={[styles.securityNote, { marginTop: 0 }]}>
-                Your password is SHA-256 hashed before transmission and never stored.
+            <View style={styles.securityRow}>
+              <Lock size={11} color={colors.textDisabled} strokeWidth={2} />
+              <Text style={[styles.securityNote, { color: colors.textDisabled }]}>
+                Password is SHA-256 hashed before transmission and never stored.
               </Text>
             </View>
           </View>
@@ -272,110 +238,53 @@ export function LoginScreen() {
           {/* Feature pills */}
           <View style={styles.features}>
             {[
-              { text: 'Outage Alerts', icon: <TriangleAlert size={14} color={Colors.amberLight} /> },
-              { text: 'Battery Monitor', icon: <Battery size={14} color={Colors.amberLight} /> },
-              { text: 'Usage Insights', icon: <ChartColumn size={14} color={Colors.amberLight} /> },
-              { text: 'Instant Push', icon: <Bell size={14} color={Colors.amberLight} /> },
+              { text: 'Outage Alerts', icon: <TriangleAlert size={13} color={colors.brandBright} strokeWidth={2} /> },
+              { text: 'Battery Monitor', icon: <Battery size={13} color={colors.brandBright} strokeWidth={2} /> },
+              { text: 'Usage Insights', icon: <ChartColumn size={13} color={colors.brandBright} strokeWidth={2} /> },
+              { text: 'Instant Push', icon: <Bell size={13} color={colors.brandBright} strokeWidth={2} /> },
             ].map((f) => (
-              <View key={f.text} style={[styles.featurePill, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
+              <View
+                key={f.text}
+                style={[
+                  styles.featurePill,
+                  { backgroundColor: colors.glassFill, borderColor: colors.border },
+                ]}
+              >
                 {f.icon}
-                <Text style={styles.featurePillText}>{f.text}</Text>
+                <Text style={[styles.featurePillText, { color: colors.textSecondary }]}>{f.text}</Text>
               </View>
             ))}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Station picker modal */}
-      {showPicker && pendingTokens && (
-        <StationPickerModal
-          stations={pendingStations}
-          onSelect={(station) => completeLogin(pendingTokens, station.id)}
-          onCancel={() => {
+      {/* Station picker sheet */}
+      {showPicker && pendingTokens ? (
+        <Sheet
+          visible={showPicker}
+          title="Select Your Station"
+          subtitle="Multiple stations found on your account"
+          onClose={() => {
             setShowPicker(false);
             setPendingTokens(null);
             setPendingStations([]);
           }}
+          rows={sheetRows}
         />
-      )}
+      ) : null}
     </>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const pickerStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: BorderRadius['2xl'],
-    borderTopRightRadius: BorderRadius['2xl'],
-    borderWidth: 1,
-    borderBottomWidth: 0,
-    borderColor: Colors.glassBorder,
-    padding: Spacing['2xl'],
-    paddingBottom: Spacing['3xl'],
-    maxHeight: '60%',
-  },
-  title: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.xl,
-    color: Colors.textPrimary,
-    marginBottom: Spacing.xs,
-  },
-  subtitle: {
-    fontFamily: Typography.fontFamily.regular,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
-    marginBottom: Spacing.lg,
-  },
-  stationItem: {
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.sm,
-  },
-  stationName: {
-    fontFamily: Typography.fontFamily.semiBold,
-    fontSize: Typography.fontSize.base,
-    color: Colors.textPrimary,
-  },
-  stationId: {
-    fontFamily: Typography.fontFamily.mono,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textMuted,
-    marginTop: 2,
-  },
-  separator: {
-    height: 1,
-    backgroundColor: Colors.divider,
-  },
-  cancelBtn: {
-    marginTop: Spacing.lg,
-    alignItems: 'center',
-    paddingVertical: Spacing.md,
-    backgroundColor: Colors.glassLight,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-  },
-  cancelText: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.base,
-    color: Colors.textSecondary,
-  },
-});
-
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   scroll: {
     flexGrow: 1,
-    paddingHorizontal: Spacing['2xl'],
+    paddingHorizontal: PAGE_GUTTER,
     paddingVertical: Spacing['3xl'],
     justifyContent: 'center',
   },
@@ -386,111 +295,81 @@ const styles = StyleSheet.create({
   logoContainer: {
     position: 'relative',
     marginBottom: Spacing.lg,
-  },
-  logoIcon: {
-    fontSize: 72,
+    width: 96,
+    height: 96,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   logoGlow: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
-    right: 10,
-    bottom: 10,
-    backgroundColor: Colors.amberGlow,
-    borderRadius: 999,
-    zIndex: -1,
+    ...StyleSheet.absoluteFill,
+    borderRadius: 48,
   },
   appName: {
-    fontFamily: Typography.fontFamily.bold,
+    fontFamily: Typography.fontFamily.displayBold,
     fontSize: Typography.fontSize['4xl'],
-    color: Colors.textPrimary,
     letterSpacing: -1,
   },
   tagline: {
     fontFamily: Typography.fontFamily.regular,
     fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
     marginTop: Spacing.xs,
     textAlign: 'center',
   },
   card: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius['2xl'],
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    padding: Spacing['2xl'],
-    ...Shadows.card,
+    padding: Spacing.xl,
   },
   cardTitle: {
-    fontFamily: Typography.fontFamily.bold,
+    fontFamily: Typography.fontFamily.displayBold,
     fontSize: Typography.fontSize.xl,
-    color: Colors.textPrimary,
     marginBottom: Spacing.xs,
+    letterSpacing: -0.2,
   },
   cardSubtitle: {
     fontFamily: Typography.fontFamily.regular,
     fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
     marginBottom: Spacing.xl,
   },
-  inputGroup: {
-    marginBottom: Spacing.base,
-  },
-  inputLabel: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
-    marginBottom: Spacing.xs,
-  },
-  input: {
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    paddingHorizontal: Spacing.base,
-    paddingVertical: Spacing.md,
-    fontFamily: Typography.fontFamily.regular,
-    fontSize: Typography.fontSize.base,
-    color: Colors.textPrimary,
-  },
   errorBox: {
-    backgroundColor: Colors.dangerGlow,
-    borderRadius: BorderRadius.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    borderRadius: 10,
+    borderWidth: 1,
     padding: Spacing.md,
-    marginBottom: Spacing.base,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.md,
   },
   errorText: {
     fontFamily: Typography.fontFamily.medium,
     fontSize: Typography.fontSize.sm,
-    color: Colors.dangerLight,
-  },
-  button: {
-    backgroundColor: Colors.amber,
-    borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.base,
-    alignItems: 'center',
-    marginTop: Spacing.sm,
-    ...Shadows.amber,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
+    flex: 1,
+    lineHeight: 17,
   },
   loadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    minHeight: 44,
+    marginTop: Spacing.md,
   },
-  buttonText: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.lg,
-    color: Colors.textInverse,
-    letterSpacing: 0.3,
+  loadingStep: {
+    fontFamily: Typography.fontFamily.medium,
+    fontSize: Typography.fontSize.sm,
+  },
+  securityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    marginTop: Spacing.md,
   },
   securityNote: {
     fontFamily: Typography.fontFamily.regular,
     fontSize: Typography.fontSize.xs,
-    color: Colors.textMuted,
     textAlign: 'center',
-    marginTop: Spacing.md,
   },
   features: {
     flexDirection: 'row',
@@ -500,16 +379,16 @@ const styles = StyleSheet.create({
     marginTop: Spacing['2xl'],
   },
   featurePill: {
-    backgroundColor: Colors.glassLight,
-    borderRadius: BorderRadius.full,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: Colors.glassBorder,
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
+    paddingVertical: 6,
   },
   featurePillText: {
     fontFamily: Typography.fontFamily.medium,
     fontSize: Typography.fontSize.xs,
-    color: Colors.textSecondary,
   },
 });

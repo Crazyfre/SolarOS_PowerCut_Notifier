@@ -1,19 +1,24 @@
-import React, { useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  StatusBar,
   Animated,
   Easing,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../theme';
 import { useApp } from '../context/AppContext';
+import { useTheme, withAlpha, Typography, Spacing, PAGE_GUTTER } from '../theme';
 import { OutageRecord } from '../types/telemetry';
-import Svg, { Line, Circle, Path } from 'react-native-svg';
+import Svg, { Line, Circle, Rect } from 'react-native-svg';
+import {
+  ScreenHeader,
+  HeaderAction,
+  Card,
+  Badge,
+  SectionHeader,
+} from '../components/ui';
 import {
   TriangleAlert,
   CircleCheckBig,
@@ -22,15 +27,8 @@ import {
   Clock3,
   Timer,
   RefreshCcw,
+  ChevronDown,
 } from 'lucide-react-native';
-
-function formatDate(ts: number): string {
-  return new Date(ts).toLocaleDateString([], {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  });
-}
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], {
@@ -65,153 +63,243 @@ function getRelativeDateStr(ts: number): string {
   }
 }
 
-function OutageCard({ item, index }: { item: OutageRecord; index: number }) {
-  const [expanded, setExpanded] = React.useState(false);
-  const { settings } = useApp();
-  const isOngoing = !item.endTime;
-  const duration = item.endTime ? item.endTime - item.startTime : undefined;
-  const isAmoled = settings?.amoledTheme ?? false;
-  const formatPower = (watts: number) => {
-    return `${Math.round(watts)} W`;
-  };
+// ─── Data-true battery decline chart ─────────────────────────────────────────
+// Renders the recorded SoC window (100% at start → minBatterySoc at end) as a
+// declining line on a scaled 0–100% track with threshold marker. The outage
+// record exposes start/end SoC and the threshold from settings — no fake data.
 
-  const startSoc = 100; // Assume full start or fallback
-  const endSoc = item.minBatterySoc ?? 100;
+function BatteryDeclineChart({
+  startSoc,
+  endSoc,
+  threshold,
+  warningHit,
+}: {
+  startSoc: number;
+  endSoc: number;
+  threshold: number;
+  warningHit: boolean;
+}) {
+  const { colors } = useTheme();
+  const W = 300;
+  const H = 64;
+  const PAD = 10;
+
+  // y: 100% at top (PAD), 0% at bottom (H - PAD)
+  const yFor = (soc: number) => PAD + ((100 - soc) / 100) * (H - PAD * 2);
+  const x1 = PAD + 2;
+  const x2 = W - PAD - 2;
 
   return (
-    <TouchableOpacity
-      activeOpacity={0.9}
-      onPress={() => setExpanded(!expanded)}
-      style={[
-        styles.card,
-        isOngoing && styles.cardOngoing,
-        isAmoled && styles.cardAmoled,
-      ]}
+    <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      {/* 0/50/100% grid lines */}
+      {[100, 50, 0].map((lvl) => (
+        <Line
+          key={lvl}
+          x1={PAD} y1={yFor(lvl)} x2={W - PAD} y2={yFor(lvl)}
+          stroke={withAlpha(colors.textDisabled, 12)}
+          strokeWidth="1"
+        />
+      ))}
+      {/* warning threshold zone */}
+      <Rect
+        x={PAD} y={yFor(0) - (yFor(0) - yFor(threshold))}
+        width={W - PAD * 2}
+        height={yFor(0) - yFor(threshold)}
+        fill={withAlpha(colors.danger, 8)}
+      />
+      <Line
+        x1={PAD} y1={yFor(threshold)} x2={W - PAD} y2={yFor(threshold)}
+        stroke={withAlpha(colors.danger, 40)}
+        strokeWidth="1"
+        strokeDasharray="4,3"
+      />
+      {/* SoC decline — data-true line from start to min */}
+      <Line
+        x1={x1} y1={yFor(startSoc)} x2={x2} y2={yFor(endSoc)}
+        stroke={warningHit ? colors.danger : colors.charge}
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />
+      <Circle cx={x1} cy={yFor(startSoc)} r="3.5" fill={warningHit ? colors.danger : colors.charge} />
+      <Circle cx={x2} cy={yFor(endSoc)} r="3.5" fill={warningHit ? colors.danger : colors.charge} />
+    </Svg>
+  );
+}
+
+function OutageCard({ item }: { item: OutageRecord }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const { settings } = useApp();
+  const { colors } = useTheme();
+  const isOngoing = !item.endTime;
+  const duration = item.endTime ? item.endTime - item.startTime : undefined;
+  const threshold = settings?.batteryWarningThreshold ?? 20;
+
+  const startSoc = 100; // outages begin at grid-cut; detector assumes full battery baseline
+  const endSoc = item.minBatterySoc ?? 100;
+  const warningHit = endSoc <= threshold;
+
+  return (
+    <Card
+      glowColor={isOngoing ? colors.danger : undefined}
+      style={isOngoing ? { borderColor: colors.dangerBorder } : undefined}
     >
-      {isOngoing && <View style={styles.ongoingGlow} />}
+      {/* Ongoing tint layer */}
+      {isOngoing ? (
+        <View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { backgroundColor: colors.dangerFill, borderRadius: 16 }]}
+        />
+      ) : null}
 
       <View style={styles.cardHeader}>
-        <Text style={styles.cardDayText}>{getRelativeDateStr(item.startTime)}</Text>
+        <Text style={[styles.cardDay, { color: colors.textSecondary }]}>
+          {getRelativeDateStr(item.startTime)}
+        </Text>
         {isOngoing ? (
-          <View style={styles.ongoingBadge}>
-            <Text style={styles.ongoingBadgeText}>● LIVE</Text>
-          </View>
+          <Badge label="Live" tone="danger" live />
         ) : (
-          <Text style={styles.expandHintText}>{expanded ? 'Collapse ▲' : 'Details ▼'}</Text>
+          <View style={styles.expandRow}>
+            <Text style={[styles.expandHint, { color: colors.textSecondary }]}>
+              {expanded ? 'Collapse' : 'Details'}
+            </Text>
+            <ChevronDown
+              size={14}
+              color={colors.textSecondary}
+              strokeWidth={2}
+              style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }}
+            />
+          </View>
         )}
       </View>
 
-      <View style={[styles.outageTitleRow, { gap: Spacing.sm }]}>
-        <TriangleAlert size={20} color={Colors.danger} />
-        <Text style={styles.outageTitle}>Outage</Text>
+      <View style={[styles.titleRow, { borderColor: colors.divider }]}>
+        <View style={styles.titleLeft}>
+          <TriangleAlert size={18} color={isOngoing ? colors.danger : colors.warningText} strokeWidth={2} />
+          <Text style={[styles.title, { color: colors.textPrimary }]}>
+            {isOngoing ? 'Ongoing Outage' : 'Outage'}
+          </Text>
+        </View>
+        <Text style={[styles.duration, { color: isOngoing ? colors.dangerText : colors.textPrimary }]}>
+          {isOngoing ? '—' : formatDuration(duration)}
+        </Text>
       </View>
 
       <View style={styles.cardBody}>
         <View style={styles.timeBlock}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-            <Clock3 size={14} color={Colors.textMuted} />
-            <Text style={styles.timeLabel}>Timeline</Text>
+          <View style={styles.timeMetaRow}>
+            <Clock3 size={12} color={colors.textSecondary} strokeWidth={2} />
+            <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>Start</Text>
           </View>
-          <Text style={styles.timeValue}>
-            {formatTime(item.startTime)} {item.endTime ? `→ ${formatTime(item.endTime)}` : ' (Ongoing)'}
-          </Text>
+          <Text style={[styles.timeValue, { color: colors.textPrimary }]}>{formatTime(item.startTime)}</Text>
         </View>
-
-        <View style={[styles.timeBlock, { alignItems: 'flex-end' }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-            <Timer size={14} color={Colors.textMuted} />
-            <Text style={styles.timeLabel}>Duration</Text>
+        <View style={[styles.timeBlock, styles.timeBlockEnd]}>
+          <View style={styles.timeMetaRow}>
+            <Timer size={12} color={colors.textSecondary} strokeWidth={2} />
+            <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>
+              {isOngoing ? 'Duration' : 'End'}
+            </Text>
           </View>
-          <Text style={styles.durationValue}>{formatDuration(duration)}</Text>
+          <Text style={[styles.timeValue, { color: colors.textPrimary }]}>
+            {isOngoing ? formatDuration(Date.now() - item.startTime) : formatTime(item.endTime!)}
+          </Text>
         </View>
       </View>
 
-      <View style={styles.batteryDropRow}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <BatteryMedium size={16} color={Colors.textSecondary} />
-          <Text style={styles.batteryDropLabel}>Battery usage</Text>
+      <View style={[styles.batteryRow, { borderTopColor: colors.divider }]}>
+        <View style={styles.batteryRowLeft}>
+          <BatteryMedium size={14} color={colors.textSecondary} strokeWidth={2} />
+          <Text style={[styles.batteryLabel, { color: colors.textSecondary }]}>Battery usage</Text>
         </View>
-        <Text style={styles.batteryDropValue}>
+        <Text style={[styles.batteryValue, { color: warningHit ? colors.dangerText : colors.chargeText }]}>
           {startSoc}% → {endSoc}%
         </Text>
       </View>
 
-      {/* Expanded Details Graph & Timeline */}
-      {expanded && !isOngoing && (
-        <View style={styles.expandedContent}>
-          <Text style={styles.expandedSectionTitle}>Load & Battery Timeline</Text>
-          
-          {/* Mini plot diagram using SVG */}
-          <View style={styles.chartWrapper}>
-            <Svg width="100%" height="80" viewBox="0 0 300 80">
-              {/* Battery level line (descending) */}
-              <Line x1="10" y1="20" x2="290" y2="60" stroke={Colors.blue} strokeWidth="3" />
-              <Circle cx="10" cy="20" r="4" fill={Colors.blue} />
-              <Circle cx="290" cy="60" r="4" fill={Colors.blue} />
-              
-              {/* Load line (varying) */}
-              <Path
-                d="M 10 50 Q 75 20 150 45 T 290 55"
-                fill="none"
-                stroke={Colors.amber}
-                strokeWidth="2.5"
-                strokeDasharray="4,2"
-              />
-              
-              {/* Labels */}
-              <Text style={styles.chartTextLeft}>100%</Text>
-              <Text style={styles.chartTextRight}>{endSoc}%</Text>
-            </Svg>
-          </View>
-
-          <View style={styles.expandedMeta}>
-            <View style={styles.metaCol}>
-              <Text style={styles.metaLabel}>Peak Load</Text>
-              <Text style={styles.metaVal}>{formatPower(item.maxLoadW ?? 0)}</Text>
-            </View>
-            <View style={styles.metaCol}>
-              <Text style={styles.metaLabel}>Lowest Battery</Text>
-              <Text style={styles.metaVal}>{endSoc}%</Text>
+      {/* Expanded details — data-true chart + event timeline */}
+      {expanded && !isOngoing ? (
+        <View style={[styles.expanded, { borderTopColor: colors.divider }]}>
+          <Text style={[styles.expandedTitle, { color: colors.textSecondary }]}>Battery During Outage</Text>
+          <View style={[styles.chartWrap, { backgroundColor: colors.surface2, borderColor: colors.border }]}>
+            <BatteryDeclineChart
+              startSoc={startSoc}
+              endSoc={endSoc}
+              threshold={threshold}
+              warningHit={warningHit}
+            />
+            <View style={styles.chartLegend}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendSwatch, { backgroundColor: warningHit ? colors.danger : colors.charge }]} />
+                <Text style={[styles.legendText, { color: colors.textSecondary }]}>Charge level</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendSwatch, { backgroundColor: withAlpha(colors.danger, 40) }]} />
+                <Text style={[styles.legendText, { color: colors.textSecondary }]}>Warning zone ({threshold}%)</Text>
+              </View>
             </View>
           </View>
 
-          <View style={styles.timelineList}>
-            <View style={styles.timelineEvent}>
-              <TriangleAlert size={14} color={Colors.blueLight} />
-              <Text style={styles.timelineEventText}>
-                {formatTime(item.startTime)} - Outage started (Battery 100%)
+          <View style={styles.metaRow}>
+            <View style={styles.metaCol}>
+              <Text style={[styles.metaLabel, { color: colors.textSecondary }]}>Peak Load</Text>
+              <Text style={[styles.metaValue, { color: colors.textPrimary }]}>
+                {item.maxLoadW != null ? `${Math.round(item.maxLoadW)} W` : '—'}
               </Text>
             </View>
-            {endSoc <= (settings?.batteryWarningThreshold ?? 20) && (
+            <View style={[styles.metaCol, styles.metaColEnd]}>
+              <Text style={[styles.metaLabel, { color: colors.textSecondary }]}>Lowest Battery</Text>
+              <Text style={[styles.metaValue, { color: warningHit ? colors.dangerText : colors.textPrimary }]}>
+                {endSoc}%
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.timeline}>
+            <View style={styles.timelineEvent}>
+              <TriangleAlert size={13} color={colors.chargeText} strokeWidth={2} />
+              <Text style={[styles.timelineText, { color: colors.textSecondary }]}>
+                {formatTime(item.startTime)} — Outage started (Battery {startSoc}%)
+              </Text>
+            </View>
+            {warningHit ? (
               <View style={styles.timelineEvent}>
-                <BatteryLow size={14} color={Colors.danger} />
-                <Text style={styles.timelineEventText}>
-                  Battery warning threshold reached
+                <BatteryLow size={13} color={colors.dangerText} strokeWidth={2} />
+                <Text style={[styles.timelineText, { color: colors.textSecondary }]}>
+                  Battery warning threshold reached ({threshold}%)
                 </Text>
               </View>
-            )}
-            {item.endTime && (
+            ) : null}
+            {item.endTime ? (
               <View style={styles.timelineEvent}>
-                <CircleCheckBig size={14} color={Colors.success} />
-                <Text style={styles.timelineEventText}>
-                  {formatTime(item.endTime)} - Grid restored (Battery {endSoc}%)
+                <CircleCheckBig size={13} color={colors.successText} strokeWidth={2} />
+                <Text style={[styles.timelineText, { color: colors.textSecondary }]}>
+                  {formatTime(item.endTime)} — Grid restored (Battery {endSoc}%)
                 </Text>
               </View>
-            )}
+            ) : null}
           </View>
         </View>
-      )}
-    </TouchableOpacity>
+      ) : null}
+    </Card>
   );
 }
 
 export function HistoryScreen() {
-  const { outageHistory, reloadHistory, settings } = useApp();
+  const { outageHistory, reloadHistory } = useApp();
+  const { colors } = useTheme();
   const spinValue = useRef(new Animated.Value(0)).current;
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     reloadHistory();
   }, []);
+
+  // Ongoing outage elapsed timer
+  useEffect(() => {
+    const hasOngoing = outageHistory.some(o => !o.endTime);
+    if (!hasOngoing) return;
+    const t = setInterval(() => setRefreshTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [outageHistory]);
 
   const handleRefresh = () => {
     spinValue.setValue(0);
@@ -230,34 +318,32 @@ export function HistoryScreen() {
   });
 
   const sortedHistory = [...outageHistory].reverse(); // newest first
-  const isAmoled = settings?.amoledTheme ?? false;
+  void refreshTick; // elapsed re-render trigger
 
   return (
-    <SafeAreaView style={[styles.root, isAmoled && { backgroundColor: '#000000' }]} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
-
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Outage History</Text>
-        <TouchableOpacity
-          onPress={handleRefresh}
-          style={[styles.refreshBtn, { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }]}
-          accessibilityLabel="Refresh history"
-          testID="refresh-history-button"
-        >
-          <Animated.View style={{ transform: [{ rotate: spin }] }}>
-            <View>
-              <RefreshCcw size={14} color={Colors.amber} />
-            </View>
-          </Animated.View>
-          <Text style={styles.refreshText}>Refresh</Text>
-        </TouchableOpacity>
-      </View>
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
+      <ScreenHeader
+        title="Outage History"
+        subtitle={`${sortedHistory.length} outage${sortedHistory.length !== 1 ? 's' : ''} recorded`}
+        right={
+          <HeaderAction
+            onPress={handleRefresh}
+            icon={
+              <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                <RefreshCcw size={18} color={colors.brand} strokeWidth={2} />
+              </Animated.View>
+            }
+            accessibilityLabel="Refresh history"
+            testID="refresh-history-button"
+          />
+        }
+      />
 
       {sortedHistory.length === 0 ? (
         <View style={styles.emptyState}>
-          <CircleCheckBig size={48} color={Colors.textMuted} style={{ marginBottom: Spacing.lg }} />
-          <Text style={styles.emptyTitle}>No outages recorded</Text>
-          <Text style={styles.emptySubtitle}>
+          <CircleCheckBig size={48} color={colors.success} strokeWidth={1.5} style={{ marginBottom: Spacing.lg }} />
+          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>No outages recorded</Text>
+          <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
             Your grid has been stable. SolarGuard will log any outages here.
           </Text>
         </View>
@@ -265,179 +351,22 @@ export function HistoryScreen() {
         <FlatList
           data={sortedHistory}
           keyExtractor={(item) => item.id}
-          renderItem={({ item, index }) => (
-            <OutageCard item={item} index={sortedHistory.length - 1 - index} />
-          )}
+          renderItem={({ item }) => <OutageCard item={item} />}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
-          ListHeaderComponent={
-            <View style={styles.summaryBar}>
-              <Text style={styles.summaryText}>
-                {sortedHistory.length} outage{sortedHistory.length !== 1 ? 's' : ''} recorded
-              </Text>
-            </View>
-          }
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: Spacing['2xl'],
-    paddingVertical: Spacing.base,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.divider,
-  },
-  headerTitle: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.xl,
-    color: Colors.textPrimary,
-    letterSpacing: -0.5,
-  },
-  refreshBtn: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    backgroundColor: Colors.glassLight,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-  },
-  refreshText: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.amber,
   },
   listContent: {
-    paddingHorizontal: Spacing['2xl'],
+    padding: PAGE_GUTTER,
     paddingBottom: Spacing['3xl'],
-  },
-  summaryBar: {
-    paddingVertical: Spacing.base,
-  },
-  summaryText: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
-  },
-  card: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.xl,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    padding: Spacing.base,
-    marginBottom: Spacing.md,
-    overflow: 'hidden',
-    ...Shadows.card,
-  },
-  cardOngoing: {
-    borderColor: Colors.danger + '66',
-  },
-  ongoingGlow: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: Colors.dangerGlow,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.sm,
-  },
-  indexBadge: {
-    backgroundColor: Colors.glassLight,
-    borderRadius: BorderRadius.sm,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-  },
-  indexText: {
-    fontFamily: Typography.fontFamily.mono,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textMuted,
-  },
-  ongoingBadge: {
-    backgroundColor: Colors.dangerGlow,
-    borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-  },
-  ongoingBadgeText: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.danger,
-    letterSpacing: 1,
-  },
-  cardBody: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  timeBlock: {
-    flex: 1,
-  },
-  timeLabel: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  timeDate: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
-  },
-  timeValue: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.lg,
-    color: Colors.textPrimary,
-  },
-  timeSeparator: {
-    alignItems: 'center',
-    paddingHorizontal: Spacing.sm,
-    gap: 4,
-  },
-  timeLine: {
-    width: 1,
-    height: 16,
-    backgroundColor: Colors.divider,
-  },
-  durationBadgeText: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.amber,
-    textAlign: 'center',
-  },
-  cardStats: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
-  statChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.glassLight,
-    borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-  },
-  statChipIcon: {
-    fontSize: 12,
-  },
-  statChipText: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textSecondary,
   },
   emptyState: {
     flex: 1,
@@ -445,139 +374,182 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: Spacing['3xl'],
   },
-  emptyIcon: {
-    fontSize: 56,
-    marginBottom: Spacing.lg,
-  },
   emptyTitle: {
-    fontFamily: Typography.fontFamily.bold,
+    fontFamily: Typography.fontFamily.displayBold,
     fontSize: Typography.fontSize.xl,
-    color: Colors.textPrimary,
     marginBottom: Spacing.sm,
     textAlign: 'center',
   },
   emptySubtitle: {
     fontFamily: Typography.fontFamily.regular,
     fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 21,
   },
-  cardAmoled: {
-    backgroundColor: '#000000',
-    borderColor: '#222',
-  },
-  cardDayText: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
-  },
-  expandHintText: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.amber,
-  },
-  outageTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    marginVertical: Spacing.xs,
-  },
-  outageIcon: {
-    fontSize: 16,
-  },
-  outageTitle: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.lg,
-    color: Colors.textPrimary,
-  },
-  durationValue: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.base,
-    color: Colors.amber,
-  },
-  batteryDropRow: {
+  cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: Spacing.sm,
-    paddingTop: Spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Colors.divider,
-  },
-  batteryDropLabel: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textMuted,
-  },
-  batteryDropValue: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.blueLight,
-  },
-  expandedContent: {
-    marginTop: Spacing.md,
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.divider,
-  },
-  expandedSectionTitle: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    alignItems: 'center',
     marginBottom: Spacing.sm,
   },
-  chartWrapper: {
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.sm,
-    marginBottom: Spacing.md,
+  cardDay: {
+    fontFamily: Typography.fontFamily.semiBold,
+    fontSize: Typography.fontSize.sm,
   },
-  chartTextLeft: {
-    fontFamily: Typography.fontFamily.mono,
-    fontSize: 9,
-    color: Colors.textMuted,
+  expandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    minHeight: 44,
   },
-  chartTextRight: {
-    fontFamily: Typography.fontFamily.mono,
-    fontSize: 9,
-    color: Colors.textMuted,
+  expandHint: {
+    fontFamily: Typography.fontFamily.medium,
+    fontSize: Typography.fontSize.xs,
   },
-  expandedMeta: {
+  titleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    paddingBottom: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  titleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  title: {
+    fontFamily: Typography.fontFamily.semiBold,
+    fontSize: Typography.fontSize.lg,
+    letterSpacing: -0.2,
+  },
+  duration: {
+    fontFamily: Typography.fontFamily.monoMedium,
+    fontSize: Typography.fontSize.base,
+    fontVariant: ['tabular-nums'],
+  },
+  cardBody: {
+    flexDirection: 'row',
+    marginBottom: Spacing.md,
+  },
+  timeBlock: {
+    flex: 1,
+  },
+  timeBlockEnd: {
+    alignItems: 'flex-end',
+  },
+  timeMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 2,
+  },
+  timeLabel: {
+    fontFamily: Typography.fontFamily.medium,
+    fontSize: Typography.fontSize.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  timeValue: {
+    fontFamily: Typography.fontFamily.monoMedium,
+    fontSize: Typography.fontSize.lg - 2,
+    fontVariant: ['tabular-nums'],
+  },
+  batteryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.sm,
+  },
+  batteryRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  batteryLabel: {
+    fontFamily: Typography.fontFamily.medium,
+    fontSize: Typography.fontSize.xs,
+  },
+  batteryValue: {
+    fontFamily: Typography.fontFamily.monoMedium,
+    fontSize: Typography.fontSize.sm,
+    fontVariant: ['tabular-nums'],
+  },
+  expanded: {
+    marginTop: Spacing.md,
+    borderTopWidth: 1,
+    paddingTop: Spacing.md,
+  },
+  expandedTitle: {
+    fontFamily: Typography.fontFamily.semiBold,
+    fontSize: Typography.fontSize.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: Spacing.sm,
+  },
+  chartWrap: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: Spacing.sm,
+    marginBottom: Spacing.md,
+    overflow: 'hidden',
+  },
+  chartLegend: {
+    flexDirection: 'row',
+    gap: Spacing.lg,
+    marginTop: Spacing.xs,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  legendSwatch: {
+    width: 8,
+    height: 3,
+    borderRadius: 1.5,
+  },
+  legendText: {
+    fontFamily: Typography.fontFamily.regular,
+    fontSize: Typography.fontSize.xs,
+  },
+  metaRow: {
+    flexDirection: 'row',
     marginBottom: Spacing.md,
   },
   metaCol: {
     flex: 1,
   },
+  metaColEnd: {
+    alignItems: 'flex-end',
+  },
   metaLabel: {
     fontFamily: Typography.fontFamily.medium,
     fontSize: Typography.fontSize.xs,
-    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  metaVal: {
-    fontFamily: Typography.fontFamily.bold,
+  metaValue: {
+    fontFamily: Typography.fontFamily.monoMedium,
     fontSize: Typography.fontSize.base,
-    color: Colors.textPrimary,
+    fontVariant: ['tabular-nums'],
     marginTop: 2,
   },
-  timelineList: {
-    gap: Spacing.xs,
+  timeline: {
+    gap: Spacing.sm,
   },
   timelineEvent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
   },
-  timelineDot: {
-    fontSize: 10,
-    color: Colors.blueLight,
-  },
-  timelineEventText: {
+  timelineText: {
     fontFamily: Typography.fontFamily.regular,
     fontSize: Typography.fontSize.xs,
-    color: Colors.textSecondary,
+    flex: 1,
+    lineHeight: 16,
   },
 });

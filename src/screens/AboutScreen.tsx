@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView, ToastAndroid, Platform, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Typography, Spacing, BorderRadius } from '../theme';
+import { useTheme, Typography, Spacing, PAGE_GUTTER } from '../theme';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import packageJson from '../../package.json';
+import { ScreenHeader, HeaderAction, Card, SectionHeader, Badge } from '../components/ui';
+import { ArrowLeft, ChevronRight, GitBranch, ShieldCheck, Scale, SunMedium } from 'lucide-react-native';
 
 type RootStackParamList = {
   About: undefined;
@@ -14,6 +15,7 @@ type NavigationProp = StackNavigationProp<RootStackParamList, 'About'>;
 
 export function AboutScreen() {
   const navigation = useNavigation<NavigationProp>();
+  const { colors } = useTheme();
   const [tapCount, setTapCount] = useState(0);
   const [lastTapTime, setLastTapTime] = useState(0);
 
@@ -57,176 +59,166 @@ export function AboutScreen() {
     }
   };
 
+  const links = [
+    {
+      label: 'GitHub Repository',
+      icon: <GitBranch size={18} color={colors.textSecondary} strokeWidth={2} />,
+      url: 'https://github.com/Crazyfre/SolarOS_PowerCut_Notifier',
+    },
+    {
+      label: 'Privacy Policy',
+      icon: <ShieldCheck size={18} color={colors.textSecondary} strokeWidth={2} />,
+      url: 'https://github.com/Crazyfre/SolarOS_PowerCut_Notifier/blob/master/PRIVACY.md',
+    },
+    {
+      label: 'Licenses',
+      icon: <Scale size={18} color={colors.textSecondary} strokeWidth={2} />,
+      url: 'https://github.com/Crazyfre/SolarOS_PowerCut_Notifier/blob/master/LICENSE',
+    },
+  ];
+
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
+      <ScreenHeader
+        title="About"
+        left={
+          <HeaderAction
+            onPress={() => navigation.goBack()}
+            icon={<ArrowLeft size={20} color={colors.textPrimary} strokeWidth={2} />}
+            accessibilityLabel="Go back"
+          />
+        }
+      />
+
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Text style={styles.backButtonText}>←</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>About</Text>
-          <View style={{ width: 32 }} />
-        </View>
-
-        {/* Content Card */}
-        <View style={styles.card}>
-          <Text style={styles.appTitle}>SolarGuard</Text>
-          <TouchableOpacity activeOpacity={0.8} onPress={handleVersionTap}>
-            <Text style={styles.appVersion}>Version {packageJson.version}</Text>
+        {/* Identity card */}
+        <Card style={styles.identityCard}>
+          <View style={styles.logoRow}>
+            <SunMedium size={28} color={colors.brand} strokeWidth={2} />
+            <Text style={[styles.appTitle, { color: colors.textPrimary }]}>SolarGuard</Text>
+          </View>
+          <TouchableOpacity activeOpacity={0.8} onPress={handleVersionTap} accessibilityLabel="App version">
+            <Text style={[styles.appVersion, { color: colors.textSecondary }]}>
+              Version {packageJson.version}
+            </Text>
           </TouchableOpacity>
 
-          <View style={styles.divider} />
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
-          <Text style={styles.description}>
+          <Text style={[styles.description, { color: colors.textPrimary }]}>
             Independent companion application for SolarOS systems.
           </Text>
 
-          <Text style={styles.disclaimer}>
+          <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>
             Not affiliated with or endorsed by SolarOS.
           </Text>
 
-          <Text style={styles.legalNotes}>
+          <Text style={[styles.legalNotes, { color: colors.textDisabled }]}>
             This project is intended for educational and personal use. Users are responsible for ensuring that their use of SolarGuard complies with the terms applicable to their SolarOS accounts.
           </Text>
-        </View>
+        </Card>
 
-        {/* Links Card */}
-        <View style={styles.linksCard}>
-          <TouchableOpacity 
-            style={styles.linkRow} 
-            onPress={() => Linking.openURL('https://github.com/Crazyfre/SolarOS_PowerCut_Notifier').catch(() => {})}
-          >
-            <Text style={styles.linkText}>GitHub Repository</Text>
-            <Text style={styles.linkArrow}>→</Text>
-          </TouchableOpacity>
+        {/* Links card */}
+        <SectionHeader title="Resources" />
+        <Card style={styles.linksCard}>
+          {links.map((link, i) => (
+            <React.Fragment key={link.label}>
+              {i > 0 ? <View style={[styles.linkDivider, { backgroundColor: colors.divider }]} /> : null}
+              <TouchableOpacity
+                style={styles.linkRow}
+                onPress={() => Linking.openURL(link.url).catch(() => {})}
+                accessibilityRole="button"
+                accessibilityLabel={link.label}
+              >
+                {link.icon}
+                <Text style={[styles.linkText, { color: colors.textPrimary }]}>{link.label}</Text>
+                <ChevronRight size={16} color={colors.textDisabled} strokeWidth={2} />
+              </TouchableOpacity>
+            </React.Fragment>
+          ))}
+        </Card>
 
-          <View style={styles.separator} />
-
-          <TouchableOpacity 
-            style={styles.linkRow} 
-            onPress={() => Linking.openURL('https://github.com/Crazyfre/SolarOS_PowerCut_Notifier/blob/master/PRIVACY.md').catch(() => {})}
-          >
-            <Text style={styles.linkText}>Privacy Policy</Text>
-            <Text style={styles.linkArrow}>→</Text>
-          </TouchableOpacity>
-
-          <View style={styles.separator} />
-
-          <TouchableOpacity 
-            style={styles.linkRow} 
-            onPress={() => Linking.openURL('https://github.com/Crazyfre/SolarOS_PowerCut_Notifier/blob/master/LICENSE').catch(() => {})}
-          >
-            <Text style={styles.linkText}>Licenses</Text>
-            <Text style={styles.linkArrow}>→</Text>
-          </TouchableOpacity>
+        <View style={styles.footer}>
+          <Badge label={`v${packageJson.version}`} tone="neutral" />
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   scroll: {
-    paddingHorizontal: Spacing['2xl'],
+    paddingHorizontal: PAGE_GUTTER,
     paddingBottom: Spacing['4xl'],
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  identityCard: {
     alignItems: 'center',
-    paddingVertical: Spacing.xl,
-  },
-  backButton: {
-    padding: Spacing.xs,
-  },
-  backButtonText: {
-    fontSize: 24,
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.bold,
-  },
-  headerTitle: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.xl,
-    color: Colors.textPrimary,
-  },
-  card: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
     padding: Spacing.xl,
+    marginBottom: Spacing.xl,
+  },
+  logoRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: Spacing.lg,
+    gap: Spacing.sm,
   },
   appTitle: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize['3xl'],
-    color: Colors.amberLight,
-    marginBottom: Spacing.xs,
+    fontFamily: Typography.fontFamily.displayBold,
+    fontSize: Typography.fontSize['2xl'],
+    letterSpacing: -0.5,
   },
   appVersion: {
-    fontFamily: Typography.fontFamily.medium,
+    fontFamily: Typography.fontFamily.monoMedium,
     fontSize: Typography.fontSize.sm,
-    color: Colors.textMuted,
+    marginTop: Spacing.xs,
     marginBottom: Spacing.lg,
   },
   divider: {
     width: '100%',
     height: 1,
-    backgroundColor: Colors.divider,
     marginBottom: Spacing.lg,
   },
   description: {
     fontFamily: Typography.fontFamily.medium,
     fontSize: Typography.fontSize.base,
-    color: Colors.textPrimary,
     textAlign: 'center',
     marginBottom: Spacing.md,
   },
   disclaimer: {
-    fontFamily: Typography.fontFamily.bold,
+    fontFamily: Typography.fontFamily.semiBold,
     fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
     textAlign: 'center',
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.lg,
   },
   legalNotes: {
     fontFamily: Typography.fontFamily.regular,
     fontSize: Typography.fontSize.xs,
-    color: Colors.textMuted,
     textAlign: 'center',
     lineHeight: 16,
   },
   linksCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.lg,
   },
   linkRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: Spacing.md,
     paddingVertical: Spacing.md,
+    minHeight: 52,
   },
   linkText: {
     fontFamily: Typography.fontFamily.medium,
     fontSize: Typography.fontSize.base,
-    color: Colors.textPrimary,
+    flex: 1,
   },
-  linkArrow: {
-    fontSize: Typography.fontSize.base,
-    color: Colors.textMuted,
-  },
-  separator: {
+  linkDivider: {
     height: 1,
-    backgroundColor: Colors.divider,
+  },
+  footer: {
+    alignItems: 'center',
+    marginTop: Spacing.xl,
   },
 });
