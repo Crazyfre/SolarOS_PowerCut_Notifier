@@ -71,6 +71,7 @@ async function geofenceTaskExecutor({
   if (isEnter) {
     await GeofenceStore.setState({ inside: true, lastTransitionAt: Date.now() });
     await GeofenceStore.recordEvent({ kind: 'ENTER', at: Date.now() });
+    await GeofenceStore.stampBootMarker();
 
     // Waking into the zone: start the monitoring FGS (siren-capable).
     // If Android refuses the background FGS start, the poll loop's next
@@ -84,6 +85,7 @@ async function geofenceTaskExecutor({
   } else {
     await GeofenceStore.setState({ inside: false, lastTransitionAt: Date.now() });
     await GeofenceStore.recordEvent({ kind: 'EXIT', at: Date.now() });
+    await GeofenceStore.stampBootMarker();
 
     // Leaving the zone: run a final poll with remote flag so the transition
     // diff is up to date, then stop the FGS entirely.

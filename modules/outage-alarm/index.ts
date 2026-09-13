@@ -12,6 +12,8 @@ interface OutageAlarmModuleType {
   stopAlarm(): void;
   isAlarmPlaying(): boolean;
   isIgnoringBatteryOptimizations(): boolean;
+  /** Stable per-boot identifier (wallClock - elapsedRealtime). */
+  getBootId(): string;
 }
 
 const OutageAlarm = requireNativeModule<OutageAlarmModuleType>('OutageAlarm');

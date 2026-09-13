@@ -178,6 +178,14 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
           if (!pollTimerRef.current) {
             pollTimerRef.current = setInterval(refreshTelemetry, FOREGROUND_POLL_INTERVAL_MS);
           }
+          // Self-heal: re-assert geofence registration on foreground return.
+          // Covers location-services toggles, Play Services fence wipes and
+          // OEM interference that happen while we're backgrounded.
+          // registerGeofence is idempotent (expo-location replaces registration).
+          const settingsNow = settings;
+          if (settingsNow.monitoringMode === 'geofenced' && settingsNow.homeZone) {
+            registerGeofence(settingsNow.homeZone).catch(() => {});
+          }
         }
       } else if (pollTimerRef.current) {
         clearInterval(pollTimerRef.current);
@@ -185,7 +193,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
       }
     });
     return () => sub.remove();
-  }, [isLoggedIn, systemId, refreshTelemetry]);
+  }, [isLoggedIn, systemId, refreshTelemetry, settings]);
 
   // ─── Monitoring Mode Router (foreground service + geofence) ────────────────
   // 'always': FGS runs unconditionally (legacy behavior).
@@ -200,6 +208,15 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
     }
 
     const applyMode = async () => {
+      // Boot guard: if the device rebooted since the last fence transition,
+      // persisted `inside` is stale (Android wipes fence registrations).
+      // Reset to unknown — fail-loud until the next ENTER/EXIT or in-app
+      // location check re-establishes it.
+      if (await GeofenceStore.shouldResetFenceState()) {
+        console.warn('[AppContext] Device rebooted since last fence state — resetting.');
+        await GeofenceStore.invalidateState();
+      }
+
       if (settings.monitoringMode === 'geofenced' && settings.homeZone) {
         // Arm the native fence (idempotent) + remote polling safety net.
         const armed = await registerGeofence(settings.homeZone);
@@ -212,6 +229,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
         }
 
         await armRemotePolling();
+        await GeofenceStore.stampBootMarker();
 
         const geo = await GeofenceStore.getState();
         setGeofenceState(geo);

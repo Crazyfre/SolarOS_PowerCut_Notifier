@@ -4,6 +4,7 @@ import { Store } from '../storage/secureStore';
 import { SettingsStore } from '../storage/settingsStore';
 import { detectAndAlert } from './stateDetector';
 import { GeofenceStore } from '../storage/geofenceStore';
+import { verifyInsideZone } from './geofenceService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const MONITORING_CHANNEL_ID = 'solarguard_monitoring_channel';
@@ -13,6 +14,9 @@ let isServiceRunning = false;
 let loopPromiseResolver: (() => void) | null = null;
 let activeTimer: ReturnType<typeof setTimeout> | null = null;
 let sleepResolver: (() => void) | null = null;
+
+// Anti-flap hysteresis counter for missed-EXIT detection (see loop guard).
+let consecutiveOutsideSamples = 0;
 
 /**
  * Cancelable sleep using standard setTimeout.
@@ -101,19 +105,50 @@ notifee.registerForegroundService(() => {
             continue;
           }
 
-          // ── Geofenced mode guard ──────────────────────────────────────────
-          // If we're running the FGS while (per fence state) outside the home
-          // zone, this run is stale (e.g. missed EXIT event). Do one remote-
-          // mode poll, then stop the service instead of burning battery.
+          // ── Geofenced mode guard + self-healing ───────────────────────────
+          // Two verification layers while the FGS runs in geofenced mode:
+          //   a) Fence-state: if the store says we're outside, do one remote
+          //      poll then stop (stale run, e.g. missed EXIT event).
+          //   b) Location sample: if the store still says "inside" but a real
+          //      fix disagrees twice in a row, correct the missed EXIT:
+          //      update the store and treat this cycle as remote.
+          // (b) is the anti-flap hysteresis: a single bad GPS fix never
+          // kills monitoring; two consecutive ones do.
           let remote = false;
           if (settings.monitoringMode === 'geofenced' && settings.homeZone) {
+            const zone = settings.homeZone;
             const geo = await GeofenceStore.getState();
-            remote = geo.inside !== true;
-            if (remote) {
+
+            if (geo.inside !== true) {
+              remote = true;
               console.log('[ForegroundService] Outside home zone (state: ' +
                 `${geo.inside}). Stopping monitoring after this cycle.`);
               await updateDiagnostic('sg_fs_state', 'Remote / Stopping');
+            } else {
+              const verified = await verifyInsideZone(zone);
+              if (verified === false) {
+                consecutiveOutsideSamples += 1;
+                console.warn(`[ForegroundService] Location sample says outside zone ` +
+                  `(${consecutiveOutsideSamples}/2 consecutive).`);
+                if (consecutiveOutsideSamples >= 2) {
+                  console.warn('[ForegroundService] Missed EXIT detected — correcting state.');
+                  await GeofenceStore.setState({ inside: false, lastTransitionAt: Date.now() });
+                  await GeofenceStore.recordEvent({
+                    kind: 'EXIT',
+                    at: Date.now(),
+                    detail: 'detected by FGS location verification (missed geofence event)',
+                  });
+                  remote = true;
+                  await updateDiagnostic('sg_fs_state', 'Remote / Stopping (missed EXIT corrected)');
+                }
+              } else if (verified === true) {
+                consecutiveOutsideSamples = 0;
+              }
+              // verified === null: can't get a fix — keep current state
+              // (fail loud: siren-capable monitoring continues).
             }
+          } else {
+            consecutiveOutsideSamples = 0;
           }
 
           await updateDiagnostic('sg_fs_state', remote ? 'Polling (Remote)' : 'Polling');

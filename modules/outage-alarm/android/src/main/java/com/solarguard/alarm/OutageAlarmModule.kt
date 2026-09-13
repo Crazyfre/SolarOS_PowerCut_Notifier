@@ -55,5 +55,16 @@ class OutageAlarmModule : Module() {
         true
       }
     }
+
+    Function("getBootId") {
+      // Stable identifier for the current boot session. Millis since boot
+      // (elapsedRealtime) is 0 at boot, so wallClock - elapsedRealtime stays
+      // constant within one boot and changes across reboots (assuming the
+      // wall clock isn't manually adjusted mid-session — acceptable for a
+      // fence-staleness heuristic).
+      val context = appContext.reactContext ?: return@Function ""
+      val elapsed = android.os.SystemClock.elapsedRealtime()
+      (System.currentTimeMillis() - elapsed).toString()
+    }
   }
 }

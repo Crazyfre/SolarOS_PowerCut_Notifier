@@ -59,7 +59,7 @@ class OutageAlarmService : Service() {
 
         fun start(context: Context, reason: String, soundName: String, durationSeconds: Int, triggerTime: Long) {
             val now = System.currentTimeMillis()
-            
+
             if (currentState != AlarmState.IDLE) {
                 Log.d(TAG, "[Alarm Ignored] Reason: Already Running (State: $currentState)")
                 return
@@ -80,8 +80,22 @@ class OutageAlarmService : Service() {
                 putExtra(EXTRA_DURATION, durationSeconds)
                 putExtra(EXTRA_TRIGGER_TIME, triggerTime)
             }
-            
-            context.startService(intent)
+
+            // Use startForegroundService so this works when invoked from any
+            // context (including background / geofence headless task execution).
+            // The service MUST call startForeground() within 5 seconds — done
+            // at the top of onStartCommand via showNotification().
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                // ForegroundServiceStartNotAllowedException (Android 12+) or
+                // process-capacity issues: log loudly — siren is lost this round.
+                Log.e(TAG, "[Alarm Failed] Could not start alarm service: ${e.message}")
+            }
         }
 
         fun stop(context: Context) {
@@ -101,6 +115,21 @@ class OutageAlarmService : Service() {
         val entryTime = System.currentTimeMillis()
         val threadName = Thread.currentThread().name
         val action = intent?.action
+
+        // If we were started via startForegroundService we MUST promote to
+        // foreground within ~5s regardless of the action, or the system
+        // crashes the app with ForegroundServiceDidNotStartInTimeException.
+        // Promote first for every path, then branch on the action.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                startForeground(NOTIFICATION_ID, buildNotification())
+            } catch (e: Exception) {
+                Log.e(TAG, "startForeground failed — stopping to avoid ANR/crash", e)
+                stopSelf()
+                return START_NOT_STICKY
+            }
+        }
+
         if (action == null) {
             Log.w(TAG, "[Unexpected Shutdown/Restart] Service started with null intent or action. Shutting down service.")
             shutdown()
@@ -125,15 +154,11 @@ class OutageAlarmService : Service() {
             currentState = AlarmState.STARTING
             Log.d(TAG, "[Alarm Triggered] Reason: $reason, Sound: $soundName, Duration: ${durationSeconds}s")
 
-            val notifStart = System.currentTimeMillis()
-            showNotification()
-            val notifDuration = System.currentTimeMillis() - notifStart
-            Log.d(TAG, "[Service] showNotification completed on thread: $threadName. Duration: ${notifDuration}ms")
-
-            alarmPlayer = AlarmPlayer.getInstance(applicationContext)
-            val success = alarmPlayer?.play(soundName, triggerTime) ?: false
+            val player = AlarmPlayer.getInstance(applicationContext)
+            val success = player.play(soundName, triggerTime)
 
             if (success) {
+                alarmPlayer = player
                 currentState = AlarmState.PLAYING
                 acquireWakeLock(durationSeconds)
                 scheduleAutoStop(durationSeconds)
@@ -175,7 +200,7 @@ class OutageAlarmService : Service() {
         }
     }
 
-    private fun showNotification() {
+    private fun buildNotification(): Notification {
         createNotificationChannel()
 
         val dismissIntent = Intent(this, OutageAlarmService::class.java).apply {
@@ -199,10 +224,10 @@ class OutageAlarmService : Service() {
             )
         }
 
-        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("🚨 SolarGuard Critical Alarm")
             .setContentText("Emergency outage event detected!")
-            .setSmallIcon(resources.getIdentifier("notification_icon", "drawable", packageName).let { 
+            .setSmallIcon(resources.getIdentifier("notification_icon", "drawable", packageName).let {
                 if (it != 0) it else android.R.drawable.ic_lock_idle_alarm
             })
             .setPriority(NotificationCompat.PRIORITY_MAX)
@@ -216,9 +241,6 @@ class OutageAlarmService : Service() {
                 dismissPendingIntent
             )
             .build()
-
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, notification)
     }
 
     private fun createNotificationChannel() {
@@ -250,26 +272,35 @@ class OutageAlarmService : Service() {
     }
 
     private fun shutdown() {
-        if (currentState == AlarmState.IDLE || currentState == AlarmState.STOPPING) {
+        // Never re-enter and never double-release; but ALWAYS tear down the
+        // foreground promotion, even if no alarm was playing (e.g. a stop
+        // action arrived first, or the service restarted with a null intent).
+        if (currentState == AlarmState.STOPPING) {
             return
         }
 
+        val wasPlaying = currentState == AlarmState.PLAYING
         currentState = AlarmState.STOPPING
 
         releaseWakeLock()
 
-        try {
-            alarmPlayer?.stop()
-        } catch (e: Exception) {
-            // Ignore
-        } finally {
-            alarmPlayer = null
+        if (wasPlaying) {
+            try {
+                alarmPlayer?.stop()
+            } catch (e: Exception) {
+                // Ignore
+            }
         }
+        alarmPlayer = null
 
         stopRunnable?.let { handler.removeCallbacks(it) }
 
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.cancel(NOTIFICATION_ID)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         stopSelf()
 
         currentState = AlarmState.IDLE

@@ -137,6 +137,7 @@ export function SettingsScreen() {
   const [locationPermissions, setLocationPermissions] = useState<{ foreground: boolean; background: boolean }>({ foreground: false, background: false });
   const [geofenceRegistered, setGeofenceRegistered] = useState(false);
   const [zoneStatus, setZoneStatus] = useState<string>('');
+  const [zoneLastEvent, setZoneLastEvent] = useState<string>('');
 
   // Developer features visibility & diagnostics state
   const isFocused = useIsFocused();
@@ -248,6 +249,12 @@ export function SettingsScreen() {
         if (geoState.inside === true) setZoneStatus('Inside home zone');
         else if (geoState.inside === false) setZoneStatus('Outside home zone');
         else setZoneStatus('No transition seen yet');
+        const lastEvent = await GeofenceStore.getLastEvent();
+        if (lastEvent) {
+          const at = new Date(lastEvent.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const kindText = lastEvent.kind === 'ENTER' ? 'enter' : lastEvent.kind === 'EXIT' ? 'exit' : 'reset';
+          setZoneLastEvent(`Last ${kindText} at ${at}`);
+        }
       } catch (err) {
         console.warn('Failed to load geofence state:', err);
       }
@@ -721,9 +728,16 @@ export function SettingsScreen() {
                   />
                 </View>
                 {homeZone ? (
-                  <Text style={[styles.zoneHint, { color: colors.textSecondary }]}>
-                    {zoneStatus || 'Zone saved'} Â· sirens play inside the zone; outside it, alarms become silent push notifications.
-                  </Text>
+                  <>
+                    <Text style={[styles.zoneHint, { color: colors.textSecondary }]}>
+                      {zoneStatus || 'Zone saved'} Â· sirens play inside the zone; outside it, alarms become silent push notifications.
+                    </Text>
+                    {zoneLastEvent ? (
+                      <Text style={[styles.zoneHint, { color: colors.textDisabled, marginTop: 2 }]}>
+                        {zoneLastEvent} Â· Fence {geofenceRegistered ? 'armed' : 'not armed'}
+                      </Text>
+                    ) : null}
+                  </>
                 ) : (
                   <Text style={[styles.zoneHint, { color: colors.textSecondary }]}>
                     Enter coordinates and save to arm the fence. Alarms degrade to notifications outside your zone.

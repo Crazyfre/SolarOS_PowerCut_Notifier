@@ -1,11 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { HomeZone } from '../types/telemetry';
+import OutageAlarm from '../../modules/outage-alarm';
 
 // Single source of truth for runtime fence state. Read by the FGS poll loop
 // and the headless geofence task; survives process restarts.
 
 const FENCE_STATE_KEY = 'sg_geo_state';
 const FENCE_LAST_EVENT_KEY = 'sg_geo_last_event';
+const FENCE_BOOT_MARKER_KEY = 'sg_geo_boot_marker';
 
 export interface GeofenceState {
   /** true = inside home zone, false = outside, null = never seen a transition */
@@ -65,6 +68,73 @@ export const GeofenceStore = {
   async clear(): Promise<void> {
     try {
       await AsyncStorage.multiRemove([FENCE_STATE_KEY, FENCE_LAST_EVENT_KEY]);
+    } catch {
+      // Non-fatal
+    }
+  },
+
+  /**
+   * Boot-identity helper: returns a stable string that is constant within
+   * one device boot and (practically always) changes across reboots.
+   * Derived natively as wallClock - elapsedRealtime. Returns null off-Android
+   * or when the native module is unavailable.
+   */
+  async getBootId(): Promise<string | null> {
+    if (Platform.OS !== 'android') return null;
+    try {
+      const bootId = OutageAlarm.getBootId();
+      return bootId || null;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Authoritative reboot check: compares the persisted boot identity with
+   * the current one. Android wipes geofence registrations on reboot, so a
+   * surviving `inside` flag is stale — callers reset state to unknown and
+   * re-determine position (fail-loud: siren-capable until re-verified).
+   */
+  async shouldResetFenceState(): Promise<boolean> {
+    try {
+      const raw = await AsyncStorage.getItem(FENCE_BOOT_MARKER_KEY);
+      if (!raw) return false; // nothing recorded yet — nothing to reset
+      const marker = JSON.parse(raw) as { wallClock: number; bootId: string };
+      const bootId = await GeofenceStore.getBootId();
+      if (!bootId) return false; // can't determine — don't thrash state
+      return marker.bootId !== bootId;
+    } catch {
+      return false;
+    }
+  },
+
+  /** Invalidate persisted fence state (e.g. after reboot detection). */
+  async invalidateState(): Promise<void> {
+    try {
+      await AsyncStorage.setItem(FENCE_STATE_KEY, JSON.stringify({
+        inside: null,
+        lastTransitionAt: null,
+        registeredAt: null,
+      }));
+      await GeofenceStore.recordEvent({
+        kind: 'ERROR',
+        at: Date.now(),
+        detail: 'fence state reset (device reboot or fence re-registration)',
+      });
+    } catch {
+      // Non-fatal
+    }
+  },
+
+  /** Persist the current boot identity alongside fence state. */
+  async stampBootMarker(): Promise<void> {
+    try {
+      const bootId = await GeofenceStore.getBootId();
+      if (!bootId) return;
+      await AsyncStorage.setItem(
+        FENCE_BOOT_MARKER_KEY,
+        JSON.stringify({ wallClock: Date.now(), bootId })
+      );
     } catch {
       // Non-fatal
     }
