@@ -43,18 +43,30 @@ async function saveOutageHistory(history: OutageRecord[]): Promise<void> {
 }
 
 /**
+ * Context describing where a detection run is executing from.
+ * `remote: true` means the device is outside the home zone (or polling via
+ * background-fetch): detection stays fully active, but the audible siren is
+ * suppressed and alerts degrade to standard notifications.
+ */
+export interface DetectContext {
+  remote?: boolean;
+}
+
+/**
  * Main detection function — called on every background fetch and foreground poll.
  * Respects user alert settings.
  */
 export async function detectAndAlert(
   telemetry: TelemetryData,
-  settings: AppSettings = DEFAULT_SETTINGS
+  settings: AppSettings = DEFAULT_SETTINGS,
+  context: DetectContext = {}
 ): Promise<void> {
   const currentStatus = telemetry.gridRelayStatus; // 'on' | 'off'
   const lastStatus = await Store.getLastGridStatus();
-  
+
   const overrides = await DevOverridesStore.getOverrides();
   const isMocking = overrides.enabled;
+  const isRemote = context.remote === true;
 
   // ─── Grid status transition ────────────────────────────────────────────────
 
@@ -88,7 +100,7 @@ export async function detectAndAlert(
     }
 
     if (settings.alertOnPowerCut || settings.alertOnGridOffOnly) {
-      await sendPowerCutNotification(telemetry, settings);
+      await sendPowerCutNotification(telemetry, settings, { remote: isRemote });
     }
   } else if (lastStatus === 'off' && currentStatus === 'on') {
     // Grid just came back
@@ -114,7 +126,7 @@ export async function detectAndAlert(
     }
 
     if (settings.alertOnPowerCut && !settings.alertOnGridOffOnly) {
-      await sendGridRestoredNotification(durationMs, telemetry.batterySoc ?? 0, settings, socDrop);
+      await sendGridRestoredNotification(durationMs, telemetry.batterySoc ?? 0, settings, socDrop, { remote: isRemote });
     }
   }
 
@@ -128,14 +140,14 @@ export async function detectAndAlert(
       const critThreshold = Math.min(10, settings.batteryWarningThreshold - 5);
       if (soc <= critThreshold && !criticalNotificationSentForCurrentOutage) {
         criticalNotificationSentForCurrentOutage = true;
-        await sendBatteryCriticalNotification(soc, settings);
+        await sendBatteryCriticalNotification(soc, settings, { remote: isRemote });
       } else if (
         soc <= settings.batteryWarningThreshold &&
         !lowNotificationSentForCurrentOutage &&
         !criticalNotificationSentForCurrentOutage
       ) {
         lowNotificationSentForCurrentOutage = true;
-        await sendBatteryLowNotification(soc, load, settings);
+        await sendBatteryLowNotification(soc, load, settings, { remote: isRemote });
       }
     }
 
@@ -164,7 +176,7 @@ export async function detectAndAlert(
 
     if (currentBatStatus === 'DISCHARGE' && lastBatStatus !== 'DISCHARGE') {
       const load = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
-      await sendBatteryDischargingNotification(load, settings);
+      await sendBatteryDischargingNotification(load, settings, { remote: isRemote });
     }
     await AsyncStorage.setItem(LAST_BATTERY_STATUS_KEY, currentBatStatus);
   }
@@ -183,7 +195,7 @@ export async function detectAndAlert(
 
       if (now - lastTime > cooldownMs) {
         await AsyncStorage.setItem(LAST_OVER_SOLAR_TIME_KEY, String(now));
-        await sendOverSolarLoadNotification(usePower, pvPower, settings);
+        await sendOverSolarLoadNotification(usePower, pvPower, settings, { remote: isRemote });
       }
     }
   }

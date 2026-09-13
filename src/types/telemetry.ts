@@ -68,6 +68,21 @@ export interface OutageRecord {
 
 export type GridStatus = 'on' | 'off' | 'unknown';
 
+/** Home zone geofence configuration (lat/lng + radius in meters). */
+export interface HomeZone {
+  lat: number;
+  lng: number;
+  radiusMeters: number;
+}
+
+/**
+ * How telemetry monitoring is kept alive:
+ * - 'always': legacy behavior — foreground service runs unconditionally.
+ * - 'geofenced': foreground service runs only while inside the home zone;
+ *   outside it, Android geofencing wakes the app and alarms are notification-only.
+ */
+export type MonitoringMode = 'always' | 'geofenced';
+
 export interface AppSettings {
   alarmDurationSeconds: number;        // 5, 10, 15, 30 seconds
   useAlarmSound: boolean;              // true = alarm.wav, false = default system sound
@@ -89,7 +104,13 @@ export interface AppSettings {
   quietHoursEnabled: boolean;
   amoledTheme: boolean;
   foregroundServiceEnabled: boolean;
-  
+
+  // V3 additions — location-aware monitoring
+  monitoringMode: MonitoringMode;
+  homeZone: HomeZone | null;
+  /** true = keep legacy always-on behavior when no zone is configured */
+  homeZoneFallbackAlways?: boolean;
+
   // Tariffs
   tariffImportRate?: number;
   tariffExportRate?: number;

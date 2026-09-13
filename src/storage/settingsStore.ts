@@ -22,6 +22,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   quietHoursEnabled: false,
   amoledTheme: false,
   foregroundServiceEnabled: false,
+  monitoringMode: 'always',
+  homeZone: null,
   tariffImportRate: 7.50,
   tariffExportRate: 5.00,
 };
@@ -30,13 +32,22 @@ export const SettingsStore = {
   /**
    * Load app settings from AsyncStorage.
    * Merges stored settings with defaults to guarantee all keys exist.
+   * Migrates the legacy foregroundServiceEnabled flag to monitoringMode.
    */
   async loadSettings(): Promise<AppSettings> {
     try {
       const raw = await AsyncStorage.getItem(SETTINGS_KEY);
       if (!raw) return DEFAULT_SETTINGS;
       const parsed = JSON.parse(raw);
-      return { ...DEFAULT_SETTINGS, ...parsed };
+      const merged = { ...DEFAULT_SETTINGS, ...parsed };
+
+      // One-way migration: legacy users start in 'always' mode. 'geofenced'
+      // only activates once the user configures a home zone (see AppContext router).
+      if (parsed.monitoringMode === undefined) {
+        merged.monitoringMode = 'always';
+      }
+
+      return merged;
     } catch (error) {
       console.error('[SettingsStore] Failed to load settings:', error);
       return DEFAULT_SETTINGS;

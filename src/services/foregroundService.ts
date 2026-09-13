@@ -1,8 +1,9 @@
-import notifee, { AndroidImportance } from '@notifee/react-native';
+import notifee, { AndroidImportance, AndroidForegroundServiceType } from '@notifee/react-native';
 import { fetchTelemetry } from '../api/solar';
 import { Store } from '../storage/secureStore';
 import { SettingsStore } from '../storage/settingsStore';
 import { detectAndAlert } from './stateDetector';
+import { GeofenceStore } from '../storage/geofenceStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const MONITORING_CHANNEL_ID = 'solarguard_monitoring_channel';
@@ -55,6 +56,29 @@ async function updateDiagnostic(key: string, value: string): Promise<void> {
   }
 }
 
+/**
+ * Build the android notification config for the persistent FGS notification.
+ * The FGS type must be identical on EVERY displayNotification call while the
+ * service runs (Notifee re-invokes startForeground when the type changes).
+ * Geofenced mode -> 'location' (no OS time cap); otherwise 'dataSync'.
+ */
+function buildFgsNotificationConfig(geofenced: boolean): Parameters<typeof notifee.displayNotification>[0]['android'] {
+  const config: Parameters<typeof notifee.displayNotification>[0]['android'] = {
+    channelId: MONITORING_CHANNEL_ID,
+    asForegroundService: true,
+    ongoing: true,
+    onlyAlertOnce: true,
+    importance: AndroidImportance.DEFAULT,
+    pressAction: {
+      id: 'default',
+    },
+  };
+  if (geofenced) {
+    config.foregroundServiceTypes = [AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_LOCATION];
+  }
+  return config;
+}
+
 // Register the Notifee foreground service runner
 notifee.registerForegroundService(() => {
   return new Promise<void>((resolve) => {
@@ -65,6 +89,8 @@ notifee.registerForegroundService(() => {
     // Execute loop asynchronously
     (async () => {
       while (isServiceRunning) {
+        // Loaded per-cycle BEFORE the try so the catch block can read it too.
+        const settings = await SettingsStore.loadSettings();
         try {
           const systemId = await Store.getSystemId();
           if (!systemId) {
@@ -75,9 +101,22 @@ notifee.registerForegroundService(() => {
             continue;
           }
 
-          const settings = await SettingsStore.loadSettings();
-          
-          await updateDiagnostic('sg_fs_state', 'Polling');
+          // ── Geofenced mode guard ──────────────────────────────────────────
+          // If we're running the FGS while (per fence state) outside the home
+          // zone, this run is stale (e.g. missed EXIT event). Do one remote-
+          // mode poll, then stop the service instead of burning battery.
+          let remote = false;
+          if (settings.monitoringMode === 'geofenced' && settings.homeZone) {
+            const geo = await GeofenceStore.getState();
+            remote = geo.inside !== true;
+            if (remote) {
+              console.log('[ForegroundService] Outside home zone (state: ' +
+                `${geo.inside}). Stopping monitoring after this cycle.`);
+              await updateDiagnostic('sg_fs_state', 'Remote / Stopping');
+            }
+          }
+
+          await updateDiagnostic('sg_fs_state', remote ? 'Polling (Remote)' : 'Polling');
 
           console.log('[ForegroundService] Poll Started.');
           const pollStart = Date.now();
@@ -107,44 +146,52 @@ notifee.registerForegroundService(() => {
             throw err;
           }
           
-          // Run state analysis & alarm siren triggers
-          await detectAndAlert(telemetry, settings);
+          // Run state analysis & alarm siren triggers (remote context applied)
+          await detectAndAlert(telemetry, settings, { remote });
 
           // Format persistent notification text
-          const gridStatusText = telemetry.gridRelayStatus === 'on' 
-            ? 'Grid Connected' 
+          const gridStatusText = telemetry.gridRelayStatus === 'on'
+            ? 'Grid Connected'
             : 'Grid OFFLINE';
           const solarText = telemetry.pvPower !== undefined ? `Solar: ${telemetry.pvPower}W` : 'Solar: 0W';
           const batteryText = `Battery: ${telemetry.batterySoc}% (${
             telemetry.batteryStatus === 'CHARGE' ? 'Charging' : telemetry.batteryStatus === 'DISCHARGE' ? 'Discharging' : 'Idle'
           })`;
 
-          const body = `${gridStatusText} · ${solarText} · ${batteryText}`;
+          const body = remote
+            ? `Remote · ${gridStatusText} · ${batteryText}`
+            : `${gridStatusText} · ${solarText} · ${batteryText}`;
 
           // Update the persistent notification with the fresh stats
           await notifee.displayNotification({
             id: NOTIFICATION_ID,
             title: 'SolarGuard Monitoring',
             body,
-            android: {
-              channelId: MONITORING_CHANNEL_ID,
-              asForegroundService: true,
-              ongoing: true,
-              onlyAlertOnce: true,
-              importance: AndroidImportance.DEFAULT,
-              pressAction: {
-                id: 'default',
-              },
-            },
+            android: buildFgsNotificationConfig(!remote && settings.monitoringMode === 'geofenced'),
           });
 
           // Sleep until the next poll cycle
           const refreshMinutes = settings.refreshIntervalMinutes ?? 5;
           const delayMs = Math.max(1, refreshMinutes) * 60 * 1000;
-          
+
           const now = Date.now();
           await updateDiagnostic('sg_fs_last_poll', String(now));
           await updateDiagnostic('sg_fs_next_poll', String(now + delayMs));
+
+          // Defensive exit: geofenced mode + confirmed outside -> stop the FGS
+          // now; native geofencing owns wake-up and background-fetch owns
+          // remote polling from here on.
+          if (remote) {
+            console.log('[ForegroundService] Remote cycle complete. Stopping service.');
+            isServiceRunning = false;
+            abortSleep();
+            try {
+              await notifee.stopForegroundService();
+            } catch (err) {
+              console.warn('[ForegroundService] stopForegroundService failed:', err);
+            }
+            break;
+          }
 
           await cancelableSleep(delayMs);
 
@@ -161,16 +208,7 @@ notifee.registerForegroundService(() => {
             id: NOTIFICATION_ID,
             title: 'SolarGuard Monitoring',
             body: errorBody,
-            android: {
-              channelId: MONITORING_CHANNEL_ID,
-              asForegroundService: true,
-              ongoing: true,
-              onlyAlertOnce: true,
-              importance: AndroidImportance.DEFAULT,
-              pressAction: {
-                id: 'default',
-              },
-            },
+            android: buildFgsNotificationConfig(settings.monitoringMode === 'geofenced'),
           });
 
           const now = Date.now();
@@ -193,13 +231,23 @@ notifee.registerForegroundService(() => {
 
 export const ForegroundServiceManager = {
   /**
-   * Start the persistent foreground service
+   * Start the persistent foreground service.
+   *
+   * `reason` is diagnostics-only today (log tag), but callers distinguish
+   * user-initiated starts from geofence-ENTER wake-ups.
+   *
+   * FGS type: `location` in geofenced mode (the loop performs periodic
+   * zone verification and there is no OS time cap on location-typed FGS,
+   * unlike dataSync's ~6h/24h limit on Android 14+), `dataSync` otherwise.
    */
-  async startService(): Promise<void> {
+  async startService(reason: 'user' | 'geofence-enter' | 'boot' = 'user'): Promise<void> {
     if (isServiceRunning) {
-      console.log('[ForegroundService] Service already running. Ignoring duplicate start request.');
+      console.log(`[ForegroundService] Service already running (start reason: ${reason}). Ignoring.`);
       return;
     }
+
+    const settings = await SettingsStore.loadSettings();
+    const isGeofenced = settings.monitoringMode === 'geofenced' && !!settings.homeZone;
 
     // Create the notification channel
     await notifee.createChannel({
@@ -211,21 +259,14 @@ export const ForegroundServiceManager = {
     // Request permissions (required for Android 13+)
     await notifee.requestPermission();
 
+    console.log(`[ForegroundService] Starting service (reason: ${reason}, type: ${isGeofenced ? 'location' : 'dataSync'}).`);
+
     // Trigger the initial notification to start the foreground service
     await notifee.displayNotification({
       id: NOTIFICATION_ID,
       title: 'SolarGuard Monitoring',
       body: 'Connecting to SolarOS...',
-      android: {
-        channelId: MONITORING_CHANNEL_ID,
-        asForegroundService: true,
-        ongoing: true,
-        onlyAlertOnce: true,
-        importance: AndroidImportance.DEFAULT,
-        pressAction: {
-          id: 'default',
-        },
-      },
+      android: buildFgsNotificationConfig(isGeofenced),
     });
   },
 

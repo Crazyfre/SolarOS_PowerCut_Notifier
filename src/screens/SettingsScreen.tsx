@@ -1,12 +1,10 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Switch,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   Alert,
   Platform,
   Linking,
@@ -15,7 +13,7 @@ import {
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Typography, Spacing, BorderRadius, Shadows } from '../theme';
+import { useTheme, Typography, Spacing, PAGE_GUTTER } from '../theme';
 import { useApp } from '../context/AppContext';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -25,15 +23,27 @@ import { sendTestNotification, ALARM_SOUND_OPTIONS, requestNotificationPermissio
 import OutageAlarm from '../../modules/outage-alarm';
 import { ForegroundServiceManager } from '../services/foregroundService';
 import {
+  ScreenHeader,
+  HeaderAction,
+  SectionHeader,
+  Card,
+  SettingRow,
+  RowDivider,
+  AppSwitch,
+  SegmentedControl,
+  Badge,
+  Button,
+  Input,
+  StatusDot,
+} from '../components/ui';
+import {
   ArrowLeft,
   BellRing,
   Bell,
   Battery,
-  RefreshCcw,
   MoonStar,
   MapPinned,
   CodeXml,
-  Save,
   LogOut,
   House,
   Building2,
@@ -42,7 +52,27 @@ import {
   CircleOff,
   BatteryCharging,
   Pause,
+  ChevronRight,
+  MapPin,
+  Crosshair,
 } from 'lucide-react-native';
+import {
+  DEFAULT_ZONE_RADIUS_METERS,
+  MIN_ZONE_RADIUS_METERS,
+  MAX_ZONE_RADIUS_METERS,
+  requestForegroundLocationPermission,
+  requestBackgroundLocationPermission,
+  getLocationPermissions,
+  getCurrentLocation,
+  normalizeZone,
+  registerGeofence,
+  unregisterGeofence,
+  isGeofenceRegistered,
+  armRemotePolling,
+  disarmRemotePolling,
+} from '../services/geofenceService';
+import { GeofenceStore } from '../storage/geofenceStore';
+import type { MonitoringMode, HomeZone } from '../types/telemetry';
 
 type RootStackParamList = {
   Dashboard: undefined;
@@ -54,6 +84,7 @@ type NavigationProp = StackNavigationProp<RootStackParamList, 'Settings'>;
 
 export function SettingsScreen() {
   const { settings, updateSettings, logout, refreshTelemetry } = useApp();
+  const { colors } = useTheme();
   const navigation = useNavigation<NavigationProp>();
 
   // Permissions State
@@ -75,12 +106,12 @@ export function SettingsScreen() {
   const [alarmDuration, setAlarmDuration] = useState(settings.alarmDurationSeconds);
   const [onlyAlarmNoPopup, setOnlyAlarmNoPopup] = useState(settings.onlyAlarmNoPopup);
   const [alarmSoundName, setAlarmSoundName] = useState(settings.alarmSoundName ?? 'alarm');
-  
+
   const [alertOnPowerCut, setAlertOnPowerCut] = useState(settings.alertOnPowerCut);
   const [alertOnGridOffOnly, setAlertOnGridOffOnly] = useState(settings.alertOnGridOffOnly);
   const [alertOnBatteryDischarge, setAlertOnBatteryDischarge] = useState(settings.alertOnBatteryDischarge);
   const [alertOnOverSolarLoad, setAlertOnOverSolarLoad] = useState(settings.alertOnOverSolarLoad);
-  
+
   const [alertOnBatteryPercent, setAlertOnBatteryPercent] = useState(settings.alertOnBatteryPercent);
   const [batteryWarningThreshold, setBatteryWarningThreshold] = useState(
     String(settings.batteryWarningThreshold)
@@ -97,6 +128,16 @@ export function SettingsScreen() {
   const [quietHoursEnd, setQuietHoursEnd] = useState(settings.quietHoursEnd ?? '07:00');
   const [foregroundServiceEnabled, setForegroundServiceEnabled] = useState(settings.foregroundServiceEnabled ?? false);
 
+  // Location-aware monitoring state (V3)
+  const [monitoringMode, setMonitoringMode] = useState<MonitoringMode>(settings.monitoringMode ?? 'always');
+  const [homeZone, setHomeZone] = useState<HomeZone | null>(settings.homeZone ?? null);
+  const [zoneLat, setZoneLat] = useState(settings.homeZone ? String(settings.homeZone.lat) : '');
+  const [zoneLng, setZoneLng] = useState(settings.homeZone ? String(settings.homeZone.lng) : '');
+  const [zoneRadius, setZoneRadius] = useState(String(settings.homeZone?.radiusMeters ?? DEFAULT_ZONE_RADIUS_METERS));
+  const [locationPermissions, setLocationPermissions] = useState<{ foreground: boolean; background: boolean }>({ foreground: false, background: false });
+  const [geofenceRegistered, setGeofenceRegistered] = useState(false);
+  const [zoneStatus, setZoneStatus] = useState<string>('');
+
   // Developer features visibility & diagnostics state
   const isFocused = useIsFocused();
   const [devUnlocked, setDevUnlocked] = useState(false);
@@ -110,22 +151,22 @@ export function SettingsScreen() {
       (async () => {
         const unlocked = await AsyncStorage.getItem('sg_dev_options_unlocked') === 'true';
         setDevUnlocked(unlocked);
-        
+
         if (unlocked) {
           const state = await AsyncStorage.getItem('sg_fs_state') ?? 'Waiting for Next Poll';
           const lastResult = await AsyncStorage.getItem('sg_fs_last_result') ?? 'Success';
           const lastPoll = await AsyncStorage.getItem('sg_fs_last_poll');
           const nextPoll = await AsyncStorage.getItem('sg_fs_next_poll');
-          
+
           setFsState(state);
           setFsLastResult(lastResult);
-          
+
           if (lastPoll) {
             setFsLastPoll(new Date(parseInt(lastPoll, 10)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
           } else {
             setFsLastPoll('Never');
           }
-          
+
           if (nextPoll) {
             setFsNextPoll(new Date(parseInt(nextPoll, 10)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
           } else {
@@ -147,7 +188,7 @@ export function SettingsScreen() {
       try {
         const list = await StationService.getStations();
         setStations(list);
-        
+
         // If there is no active station select the first one
         if (!activeStationId && list.length > 0) {
           setActiveStationId(list[0].id);
@@ -197,6 +238,19 @@ export function SettingsScreen() {
       } catch (err) {
         console.warn('Failed to check battery optimization status:', err);
       }
+
+      // Location-aware monitoring state
+      try {
+        const perms = await getLocationPermissions();
+        setLocationPermissions(perms);
+        setGeofenceRegistered(await isGeofenceRegistered());
+        const geoState = await GeofenceStore.getState();
+        if (geoState.inside === true) setZoneStatus('Inside home zone');
+        else if (geoState.inside === false) setZoneStatus('Outside home zone');
+        else setZoneStatus('No transition seen yet');
+      } catch (err) {
+        console.warn('Failed to load geofence state:', err);
+      }
     })();
   }, []);
 
@@ -204,12 +258,10 @@ export function SettingsScreen() {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'active') {
-        // Re-check notification permission
         Notifications.getPermissionsAsync().then(({ status }) => {
           setHasNotificationPermission(status === 'granted');
         }).catch(() => {});
 
-        // Re-check battery optimization
         if (Platform.OS === 'android') {
           try {
             const ignored = OutageAlarm.isIgnoringBatteryOptimizations();
@@ -224,16 +276,11 @@ export function SettingsScreen() {
     };
   }, []);
 
-
-  // ─── Save settings ─────────────────────────────────────────────────────────
+  // â”€â”€â”€ Save settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const handleSave = async () => {
     const thresholdNum = parseInt(batteryWarningThreshold, 10);
-    if (
-      isNaN(thresholdNum) ||
-      thresholdNum < 10 ||
-      thresholdNum > 50
-    ) {
+    if (isNaN(thresholdNum) || thresholdNum < 10 || thresholdNum > 50) {
       Alert.alert('Invalid Input', 'Battery Warning Threshold must be between 10% and 50%.');
       return;
     }
@@ -256,6 +303,36 @@ export function SettingsScreen() {
       return;
     }
 
+    // Resolve the home zone to persist (null when unset or invalid)
+    let zone: HomeZone | null = null;
+    if (zoneLat.trim() && zoneLng.trim()) {
+      const latNum = parseFloat(zoneLat);
+      const lngNum = parseFloat(zoneLng);
+      const radiusNum = parseInt(zoneRadius, 10) || DEFAULT_ZONE_RADIUS_METERS;
+      zone = normalizeZone(latNum, lngNum, radiusNum);
+      if (!zone) {
+        Alert.alert('Invalid Input', 'Home zone coordinates are invalid.');
+        return;
+      }
+      setHomeZone(zone);
+      setZoneRadius(String(zone.radiusMeters));
+    }
+
+    // Validate home zone when geofenced mode is selected
+    if (monitoringMode === 'geofenced') {
+      const latNum = parseFloat(zoneLat);
+      const lngNum = parseFloat(zoneLng);
+      const radiusNum = parseInt(zoneRadius, 10);
+      if (isNaN(latNum) || isNaN(lngNum) || latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
+        Alert.alert('Invalid Input', 'Home zone coordinates must be valid latitude/longitude values.');
+        return;
+      }
+      if (isNaN(radiusNum) || radiusNum < MIN_ZONE_RADIUS_METERS || radiusNum > MAX_ZONE_RADIUS_METERS) {
+        Alert.alert('Invalid Input', `Zone radius must be between ${MIN_ZONE_RADIUS_METERS} and ${MAX_ZONE_RADIUS_METERS} meters.`);
+        return;
+      }
+    }
+
     const updated = {
       alarmDurationSeconds: alarmDuration,
       useAlarmSound,
@@ -275,6 +352,8 @@ export function SettingsScreen() {
       quietHoursEnabled,
       amoledTheme,
       foregroundServiceEnabled,
+      monitoringMode,
+      homeZone: zone,
       tariffImportRate: importRateNum,
       tariffExportRate: exportRateNum,
     };
@@ -312,6 +391,20 @@ export function SettingsScreen() {
 
     await DevOverridesStore.saveOverrides(overrides);
 
+    // Arm/disarm the native geofence to match the saved configuration
+    try {
+      if (monitoringMode === 'geofenced' && zone) {
+        await registerGeofence(zone);
+        await armRemotePolling();
+      } else {
+        await unregisterGeofence();
+        await disarmRemotePolling();
+      }
+      setGeofenceRegistered(await isGeofenceRegistered());
+    } catch (err) {
+      console.warn('Failed to sync geofence registration:', err);
+    }
+
     // Trigger immediate refresh in the background so telemetry changes are applied & alerts run
     refreshTelemetry().catch(() => {});
 
@@ -320,7 +413,7 @@ export function SettingsScreen() {
     ]);
   };
 
-  // ─── Logout handler ────────────────────────────────────────────────────────
+  // â”€â”€â”€ Logout handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const handleLogout = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out from SolarGuard?', [
@@ -335,275 +428,152 @@ export function SettingsScreen() {
     ]);
   };
 
-  return (
-    <SafeAreaView style={[styles.root, amoledTheme && { backgroundColor: '#000000' }]} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <ArrowLeft size={18} color={Colors.textPrimary} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Settings</Text>
-          {/* balance back button */}
-          <View style={{ width: 32 }} />
-        </View>
+  const switchA11y = (label: string) => ({ accessibilityLabel: label });
 
+  const stationIcon = (name: string) => {
+    const color = colors.textSecondary;
+    if (name.includes('Home')) return <House size={16} color={color} strokeWidth={2} />;
+    if (name.includes('Office')) return <Building2 size={16} color={color} strokeWidth={2} />;
+    return <Zap size={16} color={color} strokeWidth={2} />;
+  };
+
+  return (
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
+      <ScreenHeader
+        title="Settings"
+        left={
+          <HeaderAction
+            onPress={() => navigation.goBack()}
+            icon={<ArrowLeft size={20} color={colors.textPrimary} strokeWidth={2} />}
+            accessibilityLabel="Go back"
+          />
+        }
+      />
+
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ALARM SYSTEM CONFIG */}
         <View style={styles.section}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
-            <BellRing size={16} color={Colors.textSecondary} />
-            <Text style={[styles.sectionHeader, { marginBottom: 0 }]}>Alarm & Sound Config</Text>
-          </View>
-          
-          <View style={styles.card}>
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Custom Alarm Siren</Text>
-                <Text style={styles.rowSub}>Use high-pitch pulsing siren tone</Text>
-              </View>
-              <Switch
-                value={useAlarmSound}
-                onValueChange={setUseAlarmSound}
-                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
-                thumbColor={useAlarmSound ? Colors.textInverse : Colors.textMuted}
-              />
-            </View>
-
-            <View style={styles.separator} />
-
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Only Alarm, No Popup</Text>
-                <Text style={styles.rowSub}>Trigger sound without on-screen banner</Text>
-              </View>
-              <Switch
-                value={onlyAlarmNoPopup}
-                onValueChange={setOnlyAlarmNoPopup}
-                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
-                thumbColor={onlyAlarmNoPopup ? Colors.textInverse : Colors.textMuted}
-              />
-            </View>
-
-            <View style={styles.separator} />
-
-            <View style={styles.column}>
-              <Text style={styles.rowTitle}>Alarm Ring Duration</Text>
-              <View style={styles.durationSelector}>
-                {[5, 10, 15, 30].map((sec) => (
-                  <TouchableOpacity
-                    key={sec}
-                    style={[
-                      styles.durationButton,
-                      alarmDuration === sec && styles.durationButtonActive,
-                    ]}
-                    onPress={() => setAlarmDuration(sec)}
-                  >
-                    <Text
-                      style={[
-                        styles.durationText,
-                        alarmDuration === sec && styles.durationTextActive,
-                      ]}
-                    >
-                      {sec}s
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {useAlarmSound && (
+          <SectionHeader title="Alarm & Sound" icon={<BellRing size={14} color={colors.textSecondary} strokeWidth={2} />} />
+          <Card>
+            <SettingRow title="Custom Alarm Siren" subtitle="Use high-pitch pulsing siren tone">
+              <AppSwitch value={useAlarmSound} onValueChange={setUseAlarmSound} {...switchA11y('Custom alarm siren')} />
+            </SettingRow>
+            <RowDivider />
+            <SettingRow title="Only Alarm, No Popup" subtitle="Trigger sound without on-screen banner">
+              <AppSwitch value={onlyAlarmNoPopup} onValueChange={setOnlyAlarmNoPopup} {...switchA11y('Only alarm no popup')} />
+            </SettingRow>
+            <RowDivider />
+            <SettingRow title="Alarm Ring Duration">
+              <Text style={[styles.inlineValue, { color: colors.brandBright }]}>{alarmDuration}s</Text>
+            </SettingRow>
+            <SegmentedControl
+              options={[5, 10, 15, 30].map(s => ({ value: s, label: `${s}s` }))}
+              value={alarmDuration}
+              onChange={setAlarmDuration}
+            />
+            {useAlarmSound ? (
               <>
-                <View style={styles.separator} />
-                <View style={styles.column}>
-                  <Text style={styles.rowTitle}>Select Alarm Tone</Text>
-                  <View style={styles.soundSelector}>
-                    {ALARM_SOUND_OPTIONS.map((option) => (
-                      <TouchableOpacity
-                        key={option.id}
-                        style={[
-                          styles.soundButton,
-                          alarmSoundName === option.id && styles.soundButtonActive,
-                        ]}
-                        onPress={() => setAlarmSoundName(option.id)}
-                      >
-                        <Text
-                          style={[
-                            styles.soundText,
-                            alarmSoundName === option.id && styles.soundTextActive,
-                          ]}
-                        >
-                          {option.name}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
+                <RowDivider />
+                <SettingRow title="Alarm Tone">
+                  <Text style={[styles.inlineValue, { color: colors.textPrimary }]} numberOfLines={1}>
+                    {ALARM_SOUND_OPTIONS.find(o => o.id === alarmSoundName)?.name ?? 'â€”'}
+                  </Text>
+                </SettingRow>
+                <SegmentedControl
+                  options={ALARM_SOUND_OPTIONS.map(o => ({ value: o.id as typeof alarmSoundName, label: o.name }))}
+                  value={alarmSoundName}
+                  onChange={setAlarmSoundName}
+                />
               </>
-            )}
-          </View>
+            ) : null}
+          </Card>
         </View>
 
-        {/* ALERTS FILTER */}
+        {/* ALERT FILTERS */}
         <View style={styles.section}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
-            <Bell size={16} color={Colors.textSecondary} />
-            <Text style={[styles.sectionHeader, { marginBottom: 0 }]}>Alert Filter Preferences</Text>
-          </View>
-
-          <View style={styles.card}>
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Grid Outages & Restores</Text>
-                <Text style={styles.rowSub}>Alert instantly on power cuts</Text>
-              </View>
-              <Switch
-                value={alertOnPowerCut}
-                onValueChange={setAlertOnPowerCut}
-                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
-                thumbColor={alertOnPowerCut ? Colors.textInverse : Colors.textMuted}
-              />
-            </View>
-
-            <View style={styles.separator} />
-
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Grid Off Alerts Only</Text>
-                <Text style={styles.rowSub}>Trigger alarm only when grid goes offline</Text>
-              </View>
-              <Switch
-                value={alertOnGridOffOnly}
-                onValueChange={setAlertOnGridOffOnly}
-                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
-                thumbColor={alertOnGridOffOnly ? Colors.textInverse : Colors.textMuted}
-              />
-            </View>
-
-            <View style={styles.separator} />
-
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Battery Discharging</Text>
-                <Text style={styles.rowSub}>Alert when grid is on but using battery</Text>
-              </View>
-              <Switch
-                value={alertOnBatteryDischarge}
-                onValueChange={setAlertOnBatteryDischarge}
-                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
-                thumbColor={alertOnBatteryDischarge ? Colors.textInverse : Colors.textMuted}
-              />
-            </View>
-
-            <View style={styles.separator} />
-
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Load Exceeds Solar Output</Text>
-                <Text style={styles.rowSub}>Alert when drawing remainder power</Text>
-              </View>
-              <Switch
-                value={alertOnOverSolarLoad}
-                onValueChange={setAlertOnOverSolarLoad}
-                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
-                thumbColor={alertOnOverSolarLoad ? Colors.textInverse : Colors.textMuted}
-              />
-            </View>
-
-            <View style={styles.separator} />
-
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Battery Warning Threshold</Text>
-                <Text style={styles.rowSub}>Alert when battery SOC drops below %</Text>
-              </View>
-              <Switch
-                value={alertOnBatteryPercent}
-                onValueChange={setAlertOnBatteryPercent}
-                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
-                thumbColor={alertOnBatteryPercent ? Colors.textInverse : Colors.textMuted}
-              />
-            </View>
-
-            {alertOnBatteryPercent && (
-              <View style={styles.thresholdInputRow}>
-                <Text style={styles.thresholdLabel}>Trigger Threshold (%)</Text>
-                <TextInput
-                  style={styles.thresholdInput}
+          <SectionHeader title="Alert Filters" icon={<Bell size={14} color={colors.textSecondary} strokeWidth={2} />} />
+          <Card>
+            <SettingRow title="Grid Outages & Restores" subtitle="Alert instantly on power cuts">
+              <AppSwitch value={alertOnPowerCut} onValueChange={setAlertOnPowerCut} {...switchA11y('Grid outage alerts')} />
+            </SettingRow>
+            <RowDivider />
+            <SettingRow title="Grid Off Alerts Only" subtitle="Alarm only when grid goes offline">
+              <AppSwitch value={alertOnGridOffOnly} onValueChange={setAlertOnGridOffOnly} {...switchA11y('Grid off only')} />
+            </SettingRow>
+            <RowDivider />
+            <SettingRow title="Battery Discharging" subtitle="Alert when grid is on but using battery">
+              <AppSwitch value={alertOnBatteryDischarge} onValueChange={setAlertOnBatteryDischarge} {...switchA11y('Battery discharging alerts')} />
+            </SettingRow>
+            <RowDivider />
+            <SettingRow title="Load Exceeds Solar" subtitle="Alert when drawing remainder power">
+              <AppSwitch value={alertOnOverSolarLoad} onValueChange={setAlertOnOverSolarLoad} {...switchA11y('Load exceeds solar alerts')} />
+            </SettingRow>
+            <RowDivider />
+            <SettingRow title="Battery Warning Threshold" subtitle="Alert when SoC drops below %">
+              <AppSwitch value={alertOnBatteryPercent} onValueChange={setAlertOnBatteryPercent} {...switchA11y('Battery warning threshold alerts')} />
+            </SettingRow>
+            {alertOnBatteryPercent ? (
+              <View style={styles.thresholdRow}>
+                <Text style={[styles.thresholdLabel, { color: colors.textSecondary }]}>Trigger at (%)</Text>
+                <Input
                   value={batteryWarningThreshold}
                   onChangeText={setBatteryWarningThreshold}
                   keyboardType="numeric"
                   maxLength={2}
+                  compactWidth={64}
+                  accessibilityLabel="Battery warning threshold percent"
                 />
               </View>
-            )}
-          </View>
+            ) : null}
+          </Card>
         </View>
 
         {/* SYSTEM PERMISSIONS & BACKGROUND */}
         <View style={styles.section}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
-            <Battery size={16} color={Colors.textSecondary} />
-            <Text style={[styles.sectionHeader, { marginBottom: 0 }]}>System Permissions & Background</Text>
-          </View>
-          <View style={styles.card}>
-            {/* Notification Permissions */}
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Notification & Alarm Sound</Text>
-                <Text style={styles.rowSub}>
-                  {hasNotificationPermission === true
-                    ? 'Permissions are granted'
-                    : 'Required to play sirens and alert banners'}
-                </Text>
-              </View>
+          <SectionHeader title="Permissions & Background" icon={<Battery size={14} color={colors.textSecondary} strokeWidth={2} />} />
+          <Card>
+            <SettingRow
+              title="Notification & Alarm Sound"
+              subtitle={
+                hasNotificationPermission === true
+                  ? 'Permissions are granted'
+                  : 'Required to play sirens and alert banners'
+              }
+            >
               {hasNotificationPermission === true ? (
-                <View style={styles.grantedBadge}>
-                  <Text style={styles.grantedBadgeText}>✓ Granted</Text>
-                </View>
+                <Badge label="Granted" tone="success" />
               ) : (
-                <TouchableOpacity
-                  style={styles.permissionBtn}
+                <Button
+                  label="Enable"
+                  size="sm"
                   onPress={async () => {
                     const granted = await requestNotificationPermissions();
                     setHasNotificationPermission(granted);
                     if (granted) {
-                      Alert.alert(
-                        'Success',
-                        'Notification and alarm permissions have been granted successfully!'
-                      );
+                      Alert.alert('Success', 'Notification and alarm permissions have been granted successfully!');
                     } else {
-                      Alert.alert(
-                        'Permission Denied',
-                        'Failed to request permission. Please enable notifications in your phone Settings.'
-                      );
+                      Alert.alert('Permission Denied', 'Failed to request permission. Please enable notifications in your phone Settings.');
                     }
                   }}
-                >
-                  <Text style={styles.permissionBtnText}>Enable</Text>
-                </TouchableOpacity>
+                />
               )}
-            </View>
-
-            <View style={styles.separator} />
-
-            {/* Battery Optimization Bypass */}
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Background Battery Optimization</Text>
-                <Text style={styles.rowSub}>
-                  {isBatteryOptimizationBypassed === true
-                    ? 'Optimizations are disabled (Unrestricted)'
-                    : 'Prevent Android from killing SolarGuard background monitoring'}
-                </Text>
-              </View>
+            </SettingRow>
+            <RowDivider />
+            <SettingRow
+              title="Battery Optimization Bypass"
+              subtitle={
+                isBatteryOptimizationBypassed === true
+                  ? 'Optimizations are disabled (Unrestricted)'
+                  : 'Prevent Android from killing background monitoring'
+              }
+            >
               {isBatteryOptimizationBypassed === true ? (
-                <View style={styles.grantedBadge}>
-                  <Text style={styles.grantedBadgeText}>✓ Configured</Text>
-                </View>
+                <Badge label="Configured" tone="success" />
               ) : (
-                <TouchableOpacity
-                  style={styles.configureBtn}
+                <Button
+                  label="Configure"
+                  size="sm"
+                  variant="secondary"
                   onPress={() => {
                     Alert.alert(
                       'Background Performance',
@@ -620,300 +590,331 @@ export function SettingsScreen() {
                             } else {
                               Linking.openSettings().catch(() => {});
                             }
-                          }
-                        }
+                          },
+                        },
                       ]
                     );
                   }}
-                >
-                  <Text style={styles.configureBtnText}>Configure</Text>
-                </TouchableOpacity>
+                />
               )}
-            </View>
+            </SettingRow>
+            <RowDivider />
+            <SettingRow
+              title="Persistent Status Notification"
+              subtitle={`Keep monitoring active in background (every ${refreshInterval} min)`}
+            >
+              <AppSwitch value={foregroundServiceEnabled} onValueChange={setForegroundServiceEnabled} {...switchA11y('Foreground monitoring service')} />
+            </SettingRow>
+          </Card>
+        </View>
 
-            <View style={styles.separator} />
+        {/* LOCATION-AWARE MONITORING */}
+        <View style={styles.section}>
+          <SectionHeader
+            title="Location & Monitoring"
+            icon={<MapPin size={14} color={colors.textSecondary} strokeWidth={2} />}
+            right={
+              monitoringMode === 'geofenced' ? (
+                <Badge label={geofenceRegistered ? 'Armed' : 'Idle'} tone={geofenceRegistered ? 'success' : 'warning'} />
+              ) : undefined
+            }
+          />
+          <Card>
+            <SettingRow
+              title="Monitoring Mode"
+              subtitle={
+                monitoringMode === 'geofenced'
+                  ? 'Full monitoring inside your home zone; quiet alerts outside'
+                  : 'Always monitor, regardless of location'
+              }
+            />
+            <SegmentedControl
+              options={[
+                { value: 'always' as MonitoringMode, label: 'Always' },
+                { value: 'geofenced' as MonitoringMode, label: 'Geofenced' },
+              ]}
+              value={monitoringMode}
+              onChange={setMonitoringMode}
+            />
 
-            {/* Foreground Service Toggle */}
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Persistent Status Notification</Text>
-                <Text style={styles.rowSub}>
-                  Keep app active in background to fetch telemetry every 5 mins
-                </Text>
-              </View>
-              <Switch
-                value={foregroundServiceEnabled}
-                onValueChange={setForegroundServiceEnabled}
-                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
-                thumbColor={foregroundServiceEnabled ? Colors.textInverse : Colors.textMuted}
-              />
-            </View>
-          </View>
+            {monitoringMode === 'geofenced' ? (
+              <>
+                <RowDivider />
+                <SettingRow
+                  title="Location Permission"
+                  subtitle={
+                    locationPermissions.background
+                      ? 'Background location granted ("Allow all the time")'
+                      : locationPermissions.foreground
+                        ? 'Foreground granted â€” background ("Allow all the time") required for the fence'
+                        : 'Location permission required to arm the home zone'
+                  }
+                >
+                  {locationPermissions.background ? (
+                    <Badge label="Granted" tone="success" />
+                  ) : (
+                    <Button
+                      label="Enable"
+                      size="sm"
+                      onPress={async () => {
+                        const fgOk = await requestForegroundLocationPermission();
+                        if (!fgOk) {
+                          Alert.alert('Permission Denied', 'Location permission is required for geofenced monitoring.');
+                          return;
+                        }
+                        const bgOk = await requestBackgroundLocationPermission();
+                        setLocationPermissions(await getLocationPermissions());
+                        if (!bgOk) {
+                          Alert.alert(
+                            'Background Location Needed',
+                            'Please set location access to "Allow all the time" so the fence works while SolarGuard is closed.'
+                          );
+                        }
+                      }}
+                    />
+                  )}
+                </SettingRow>
+                <RowDivider />
+                <SettingRow title="Home Zone" subtitle="Center coordinates and radius of your home area">
+                  <Button
+                    label="Use Current"
+                    size="sm"
+                    variant="secondary"
+                    icon={<Crosshair size={14} color={colors.textPrimary} strokeWidth={2} />}
+                    onPress={async () => {
+                      const pos = await getCurrentLocation();
+                      if (!pos) {
+                        Alert.alert('Location Unavailable', 'Could not get a GPS fix. Check location permission and try again.');
+                        return;
+                      }
+                      setZoneLat(String(pos.lat));
+                      setZoneLng(String(pos.lng));
+                    }}
+                  />
+                </SettingRow>
+                <View style={styles.zoneInputGrid}>
+                  <Input
+                    label="Latitude"
+                    value={zoneLat}
+                    onChangeText={setZoneLat}
+                    keyboardType="numeric"
+                    placeholder="e.g. 12.9716"
+                    accessibilityLabel="Home zone latitude"
+                  />
+                  <Input
+                    label="Longitude"
+                    value={zoneLng}
+                    onChangeText={setZoneLng}
+                    keyboardType="numeric"
+                    placeholder="e.g. 77.5946"
+                    accessibilityLabel="Home zone longitude"
+                  />
+                </View>
+                <View style={styles.zoneRadiusRow}>
+                  <Input
+                    label={`Radius (m) â€” ${MIN_ZONE_RADIUS_METERS}â€“${MAX_ZONE_RADIUS_METERS}`}
+                    value={zoneRadius}
+                    onChangeText={setZoneRadius}
+                    keyboardType="numeric"
+                    compactWidth={120}
+                    accessibilityLabel="Home zone radius in meters"
+                  />
+                </View>
+                {homeZone ? (
+                  <Text style={[styles.zoneHint, { color: colors.textSecondary }]}>
+                    {zoneStatus || 'Zone saved'} Â· sirens play inside the zone; outside it, alarms become silent push notifications.
+                  </Text>
+                ) : (
+                  <Text style={[styles.zoneHint, { color: colors.textSecondary }]}>
+                    Enter coordinates and save to arm the fence. Alarms degrade to notifications outside your zone.
+                  </Text>
+                )}
+              </>
+            ) : null}
+          </Card>
         </View>
 
         {/* SMART COMPANION CONFIG */}
         <View style={styles.section}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
-            <MapPinned size={16} color={Colors.textSecondary} />
-            <Text style={[styles.sectionHeader, { marginBottom: 0 }]}>Smart Companion Config</Text>
-          </View>
-          <View style={styles.card}>
-            {/* Station switcher */}
-            {stations.length > 0 && (
-              <View style={styles.column}>
-                <Text style={styles.rowTitle}>Select Active Station</Text>
-                <Text style={styles.rowSub}>Choose which solar plant to monitor</Text>
-                <View style={styles.stationSelector}>
-                  {stations.map((st) => (
-                    <TouchableOpacity
-                      key={st.id}
-                      style={[
-                        styles.stationButton,
-                        activeStationId === st.id && styles.stationButtonActive,
-                        { flexDirection: 'row', alignItems: 'center', gap: 6 }
-                      ]}
-                      onPress={() => setActiveStationId(st.id)}
-                    >
-                      {st.name.includes('Home') ? (
-                        <House size={16} color={activeStationId === st.id ? Colors.textInverse : Colors.amber} />
-                      ) : st.name.includes('Office') ? (
-                        <Building2 size={16} color={activeStationId === st.id ? Colors.textInverse : Colors.amber} />
-                      ) : (
-                        <Zap size={16} color={activeStationId === st.id ? Colors.textInverse : Colors.amber} />
-                      )}
-                      <Text
+          <SectionHeader title="System Configuration" icon={<MapPinned size={14} color={colors.textSecondary} strokeWidth={2} />} />
+          <Card>
+            {stations.length > 0 ? (
+              <>
+                <SettingRow title="Active Station" subtitle="Choose which solar plant to monitor" />
+                <View style={styles.stationList}>
+                  {stations.map((st) => {
+                    const active = activeStationId === st.id;
+                    return (
+                      <TouchableOpacity
+                        key={st.id}
+                        onPress={() => setActiveStationId(st.id)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: active }}
+                        accessibilityLabel={`Station ${st.name}`}
                         style={[
-                          styles.stationText,
-                          activeStationId === st.id && styles.stationTextActive,
+                          styles.stationChip,
+                          {
+                            backgroundColor: active ? colors.brand : colors.surface2,
+                            borderColor: active ? colors.brand : colors.border,
+                          },
                         ]}
                       >
-                        {st.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                        {stationIcon(st.name)}
+                        <Text
+                          style={[
+                            styles.stationChipText,
+                            { color: active ? colors.textInverse : colors.textPrimary },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {st.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
-                <View style={styles.separator} />
-              </View>
-            )}
+                <RowDivider />
+              </>
+            ) : null}
 
-            {/* Battery Capacity */}
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Battery Capacity</Text>
-                <Text style={styles.rowSub}>Enter total battery storage size in kWh</Text>
-              </View>
-              <View style={styles.capacityInputContainer}>
-                <TextInput
-                  style={styles.capacityInput}
-                  value={batteryCapacity}
-                  onChangeText={setBatteryCapacity}
-                  keyboardType="numeric"
-                  placeholder="5.12"
-                />
-                <Text style={styles.capacityUnit}>kWh</Text>
-              </View>
-            </View>
-
-            <View style={styles.separator} />
-
-            {/* Electricity Tariffs */}
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Import Tariff</Text>
-                <Text style={styles.rowSub}>Electricity cost from grid (₹/kWh)</Text>
-              </View>
-              <View style={styles.capacityInputContainer}>
-                <TextInput
-                  style={styles.capacityInput}
-                  value={tariffImportRate}
-                  onChangeText={setTariffImportRate}
-                  keyboardType="numeric"
-                  placeholder="7.50"
-                />
-                <Text style={styles.capacityUnit}>₹</Text>
-              </View>
-            </View>
-
-            <View style={styles.separator} />
-
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Export Tariff</Text>
-                <Text style={styles.rowSub}>Feed-in rate credit to grid (₹/kWh)</Text>
-              </View>
-              <View style={styles.capacityInputContainer}>
-                <TextInput
-                  style={styles.capacityInput}
-                  value={tariffExportRate}
-                  onChangeText={setTariffExportRate}
-                  keyboardType="numeric"
-                  placeholder="5.00"
-                />
-                <Text style={styles.capacityUnit}>₹</Text>
-              </View>
-            </View>
-
-            <View style={styles.separator} />
-
-            {/* Refresh Interval */}
-            <View style={styles.column}>
-              <Text style={styles.rowTitle}>Refresh Interval</Text>
-              <Text style={styles.rowSub}>Select live background/foreground refresh speed</Text>
-              <View style={styles.durationSelector}>
-                {[1, 5, 15, 30].map((mins) => (
-                  <TouchableOpacity
-                    key={mins}
-                    style={[
-                      styles.durationButton,
-                      refreshInterval === mins && styles.durationButtonActive,
-                    ]}
-                    onPress={() => setRefreshInterval(mins)}
-                  >
-                    <Text
-                      style={[
-                        styles.durationText,
-                        refreshInterval === mins && styles.durationTextActive,
-                      ]}
-                    >
-                      {mins}m
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </View>
+            <SettingRow title="Battery Capacity" subtitle="Total battery storage size">
+              <Input
+                value={batteryCapacity}
+                onChangeText={setBatteryCapacity}
+                keyboardType="numeric"
+                placeholder="5.12"
+                unit="kWh"
+                compactWidth={96}
+                accessibilityLabel="Battery capacity in kilowatt hours"
+              />
+            </SettingRow>
+            <RowDivider />
+            <SettingRow title="Import Tariff" subtitle="Electricity cost from grid">
+              <Input
+                value={tariffImportRate}
+                onChangeText={setTariffImportRate}
+                keyboardType="numeric"
+                placeholder="7.50"
+                unit="â‚¹/kWh"
+                compactWidth={110}
+                accessibilityLabel="Import tariff per kilowatt hour"
+              />
+            </SettingRow>
+            <RowDivider />
+            <SettingRow title="Export Tariff" subtitle="Feed-in credit to grid">
+              <Input
+                value={tariffExportRate}
+                onChangeText={setTariffExportRate}
+                keyboardType="numeric"
+                placeholder="5.00"
+                unit="â‚¹/kWh"
+                compactWidth={110}
+                accessibilityLabel="Export tariff per kilowatt hour"
+              />
+            </SettingRow>
+            <RowDivider />
+            <SettingRow title="Refresh Interval" subtitle="Live telemetry polling speed" />
+            <SegmentedControl
+              options={[1, 5, 15, 30].map(m => ({ value: m, label: `${m}m` }))}
+              value={refreshInterval}
+              onChange={setRefreshInterval}
+            />
+          </Card>
         </View>
 
-        {/* DISPLAY & PREFERENCES */}
+        {/* DISPLAY & QUIET HOURS */}
         <View style={styles.section}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
-            <MoonStar size={16} color={Colors.textSecondary} />
-            <Text style={[styles.sectionHeader, { marginBottom: 0 }]}>Display & Quiet Hours</Text>
-          </View>
-          <View style={styles.card}>
-            {/* AMOLED Theme Switch */}
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>AMOLED Dark Theme</Text>
-                <Text style={styles.rowSub}>Use pure black background for OLED screens</Text>
+          <SectionHeader title="Display & Quiet Hours" icon={<MoonStar size={14} color={colors.textSecondary} strokeWidth={2} />} />
+          <Card>
+            <SettingRow title="AMOLED Dark Theme" subtitle="Pure black surfaces for OLED screens">
+              <AppSwitch value={amoledTheme} onValueChange={setAmoledTheme} {...switchA11y('AMOLED theme')} />
+            </SettingRow>
+            <RowDivider />
+            <SettingRow title="Quiet Hours" subtitle="Mute alert sounds during set hours">
+              <AppSwitch value={quietHoursEnabled} onValueChange={setQuietHoursEnabled} {...switchA11y('Quiet hours')} />
+            </SettingRow>
+            {quietHoursEnabled ? (
+              <View style={styles.quietRow}>
+                <Input
+                  label="Start"
+                  value={quietHoursStart}
+                  onChangeText={setQuietHoursStart}
+                  placeholder="23:00"
+                  maxLength={5}
+                  compactWidth={96}
+                  accessibilityLabel="Quiet hours start time"
+                />
+                <Input
+                  label="End"
+                  value={quietHoursEnd}
+                  onChangeText={setQuietHoursEnd}
+                  placeholder="07:00"
+                  maxLength={5}
+                  compactWidth={96}
+                  accessibilityLabel="Quiet hours end time"
+                />
               </View>
-              <Switch
-                value={amoledTheme}
-                onValueChange={setAmoledTheme}
-                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
-                thumbColor={amoledTheme ? Colors.textInverse : Colors.textMuted}
-              />
-            </View>
-
-            <View style={styles.separator} />
-
-            {/* Quiet Hours Switch */}
-            <View style={styles.row}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowTitle}>Enable Quiet Hours</Text>
-                <Text style={styles.rowSub}>Mute alert sound during specified hours</Text>
-              </View>
-              <Switch
-                value={quietHoursEnabled}
-                onValueChange={setQuietHoursEnabled}
-                trackColor={{ false: Colors.glassLight, true: Colors.amber }}
-                thumbColor={quietHoursEnabled ? Colors.textInverse : Colors.textMuted}
-              />
-            </View>
-
-            {quietHoursEnabled && (
-              <View style={styles.quietHoursInputRow}>
-                <View style={styles.timeInputBlock}>
-                  <Text style={styles.timeInputLabel}>Start Time</Text>
-                  <TextInput
-                    style={styles.timeTextInput}
-                    value={quietHoursStart}
-                    onChangeText={setQuietHoursStart}
-                    placeholder="23:00"
-                    maxLength={5}
-                  />
-                </View>
-                <View style={styles.timeInputBlock}>
-                  <Text style={styles.timeInputLabel}>End Time</Text>
-                  <TextInput
-                    style={styles.timeTextInput}
-                    value={quietHoursEnd}
-                    onChangeText={setQuietHoursEnd}
-                    placeholder="07:00"
-                    maxLength={5}
-                  />
-                </View>
-              </View>
-            )}
-          </View>
+            ) : null}
+          </Card>
         </View>
 
-        {/* DEVELOPER OPTIONS CONFIG */}
-        {devUnlocked && (
+        {/* DEVELOPER OPTIONS */}
+        {devUnlocked ? (
           <View style={styles.section}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm }}>
-              <CodeXml size={16} color={Colors.dangerLight} />
-              <Text style={[styles.sectionHeader, { marginBottom: 0, color: Colors.dangerLight }]}>Developer Options</Text>
-            </View>
+            <SectionHeader
+              title="Developer Options"
+              icon={<CodeXml size={14} color={colors.dangerText} strokeWidth={2} />}
+              right={<Badge label="Dev" tone="danger" />}
+            />
 
-            {/* Diagnostics Panel */}
-            <View style={[styles.card, { marginBottom: Spacing.md }]}>
-              <Text style={[styles.rowTitle, { color: Colors.amberLight, marginBottom: Spacing.sm }]}>Monitoring Engine Diagnostics</Text>
-              
-              <View style={styles.diagRow}>
-                <Text style={styles.diagLabel}>Status</Text>
-                <Text style={[styles.diagValue, { color: ForegroundServiceManager.isServiceRunning() ? Colors.success : Colors.danger, fontWeight: 'bold' }]}>
-                  {ForegroundServiceManager.isServiceRunning() ? 'Running' : 'Stopped'}
-                </Text>
-              </View>
-              <View style={styles.diagSeparator} />
-              
-              <View style={styles.diagRow}>
-                <Text style={styles.diagLabel}>Current State</Text>
-                <Text style={[styles.diagValue, { color: fsState.includes('Error') ? Colors.danger : Colors.textPrimary }]}>{fsState}</Text>
-              </View>
-              <View style={styles.diagSeparator} />
-
-              <View style={styles.diagRow}>
-                <Text style={styles.diagLabel}>Last Poll Result</Text>
-                <Text style={[styles.diagValue, { color: fsLastResult === 'Success' ? Colors.success : Colors.danger }]}>{fsLastResult}</Text>
-              </View>
-              <View style={styles.diagSeparator} />
-
-              <View style={styles.diagRow}>
-                <Text style={styles.diagLabel}>Service Type</Text>
-                <Text style={styles.diagValue}>Foreground Service</Text>
-              </View>
-              <View style={styles.diagSeparator} />
-
-              <View style={styles.diagRow}>
-                <Text style={styles.diagLabel}>Polling Interval</Text>
-                <Text style={styles.diagValue}>{refreshInterval} minute{refreshInterval !== 1 ? 's' : ''}</Text>
-              </View>
-              <View style={styles.diagSeparator} />
-
-              <View style={styles.diagRow}>
-                <Text style={styles.diagLabel}>Last Poll Time</Text>
-                <Text style={styles.diagValue}>{fsLastPoll}</Text>
-              </View>
-              <View style={styles.diagSeparator} />
-
-              <View style={styles.diagRow}>
-                <Text style={styles.diagLabel}>Next Poll Time</Text>
-                <Text style={styles.diagValue}>{fsNextPoll}</Text>
-              </View>
-            </View>
-
-            {/* Test Actions & Overrides */}
-            <View style={styles.card}>
-              {/* Force Test Alarm */}
-              <View style={styles.row}>
-                <View style={styles.rowInfo}>
-                  <Text style={styles.rowTitle}>Test Alarm System</Text>
-                  <Text style={styles.rowSub}>Immediately trigger critical alarm sound test</Text>
+            {/* Diagnostics panel */}
+            <Card style={styles.diagCard}>
+              <View style={styles.diagHeader}>
+                <Text style={[styles.diagTitle, { color: colors.textPrimary }]}>Monitoring Engine</Text>
+                <View style={styles.diagStatus}>
+                  <StatusDot
+                    color={ForegroundServiceManager.isServiceRunning() ? colors.success : colors.danger}
+                    mode="steady"
+                    size={7}
+                  />
+                  <Text
+                    style={[
+                      styles.diagStatusText,
+                      { color: ForegroundServiceManager.isServiceRunning() ? colors.successText : colors.dangerText },
+                    ]}
+                  >
+                    {ForegroundServiceManager.isServiceRunning() ? 'Running' : 'Stopped'}
+                  </Text>
                 </View>
-                <TouchableOpacity
-                  style={styles.testAlarmBtn}
+              </View>
+              {(
+                [
+                  ['State', fsState, fsState.includes('Error') ? colors.dangerText : colors.textPrimary],
+                  ['Last Result', fsLastResult, fsLastResult === 'Success' ? colors.successText : colors.dangerText],
+                  ['Service Type', 'Foreground Service', colors.textPrimary],
+                  ['Interval', `${refreshInterval} minute${refreshInterval !== 1 ? 's' : ''}`, colors.textPrimary],
+                  ['Last Poll', fsLastPoll, colors.textPrimary],
+                  ['Next Poll', fsNextPoll, colors.textPrimary],
+                ] as [string, string, string][]
+              ).map(([label, value, color], i) => (
+                <View key={label}>
+                  {i > 0 ? <View style={[styles.diagSeparator, { backgroundColor: colors.divider }]} /> : null}
+                  <View style={styles.diagRow}>
+                    <Text style={[styles.diagLabel, { color: colors.textSecondary }]}>{label}</Text>
+                    <Text style={[styles.diagValue, { color }]}>{value}</Text>
+                  </View>
+                </View>
+              ))}
+            </Card>
+
+            {/* Test actions & overrides */}
+            <Card style={{ marginTop: Spacing.md }}>
+              <SettingRow title="Test Alarm System" subtitle="Trigger critical alarm sound test">
+                <Button
+                  label="Test"
+                  size="sm"
+                  variant="danger"
+                  icon={<BellRing size={14} color={colors.textInverse} strokeWidth={2} />}
                   onPress={async () => {
                     try {
                       await requestNotificationPermissions();
@@ -936,6 +937,8 @@ export function SettingsScreen() {
                         quietHoursEnabled,
                         amoledTheme,
                         foregroundServiceEnabled,
+                        monitoringMode,
+                        homeZone,
                       };
                       await sendTestNotification(tempSettings);
                       Alert.alert('Alert Sent', `Critical test alert has been scheduled for ${alarmDuration}s.`);
@@ -943,633 +946,271 @@ export function SettingsScreen() {
                       Alert.alert('Error', 'Failed to send alert.');
                     }
                   }}
-                >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <BellRing size={14} color={Colors.dangerLight} />
-                    <Text style={styles.testAlarmBtnText}>Test</Text>
-                  </View>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.separator} />
-
-              {/* Overrides Toggle */}
-              <View style={styles.row}>
-                <View style={styles.rowInfo}>
-                  <Text style={styles.rowTitle}>Mock Telemetry Overrides</Text>
-                  <Text style={styles.rowSub}>Enable manually overriding grid & battery data</Text>
-                </View>
-                <Switch
-                  value={devOverridesEnabled}
-                  onValueChange={setDevOverridesEnabled}
-                  trackColor={{ false: Colors.glassLight, true: Colors.amber }}
-                  thumbColor={devOverridesEnabled ? Colors.textInverse : Colors.textMuted}
                 />
-              </View>
+              </SettingRow>
+              <RowDivider />
+              <SettingRow title="Mock Telemetry Overrides" subtitle="Manually override grid & battery data">
+                <AppSwitch value={devOverridesEnabled} onValueChange={setDevOverridesEnabled} {...switchA11y('Mock telemetry overrides')} />
+              </SettingRow>
 
-              {devOverridesEnabled && (
-                <View style={styles.developerSubSection}>
-                  <View style={styles.separator} />
-
-                  {/* Grid Status Selector */}
-                  <View style={styles.column}>
-                    <Text style={styles.rowTitle}>Grid Status</Text>
-                    <View style={styles.durationSelector}>
-                      {(['on', 'off'] as const).map((status) => (
-                        <TouchableOpacity
-                          key={status}
-                          style={[
-                            styles.durationButton,
-                            devGridRelayStatus === status && styles.durationButtonActive,
-                            { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }
-                          ]}
-                          onPress={() => setDevGridRelayStatus(status)}
-                        >
-                          {status === 'on' ? (
-                            <PlugZap size={14} color={devGridRelayStatus === status ? Colors.textInverse : Colors.success} />
-                          ) : (
-                            <CircleOff size={14} color={devGridRelayStatus === status ? Colors.textInverse : Colors.danger} />
-                          )}
-                          <Text
-                            style={[
-                              styles.durationText,
-                              devGridRelayStatus === status && styles.durationTextActive,
-                            ]}
-                          >
-                            Grid {status === 'on' ? 'On' : 'Off'}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
+              {devOverridesEnabled ? (
+                <View style={styles.devSection}>
+                  <RowDivider />
+                  <SettingRow title="Grid Status" />
+                  <SegmentedControl
+                    options={[
+                      { value: 'on' as const, label: 'Grid On', icon: <PlugZap size={14} color={colors.success} strokeWidth={2} /> },
+                      { value: 'off' as const, label: 'Grid Off', icon: <CircleOff size={14} color={colors.danger} strokeWidth={2} /> },
+                    ]}
+                    value={devGridRelayStatus}
+                    onChange={setDevGridRelayStatus}
+                  />
+                  <RowDivider />
+                  <SettingRow title="Battery Status" />
+                  <SegmentedControl
+                    options={[
+                      { value: 'CHARGE', label: 'Charging', icon: <BatteryCharging size={14} color={colors.charge} strokeWidth={2} /> },
+                      { value: 'DISCHARGE', label: 'Discharging', icon: <Battery size={14} color={colors.discharge} strokeWidth={2} /> },
+                      { value: 'IDLE', label: 'Idle', icon: <Pause size={14} color={colors.textSecondary} strokeWidth={2} /> },
+                    ]}
+                    value={devBatteryStatus}
+                    onChange={setDevBatteryStatus}
+                  />
+                  <View style={styles.devInputGrid}>
+                    <Input
+                      label="Battery SoC (%)"
+                      value={devBatterySoc}
+                      onChangeText={setDevBatterySoc}
+                      keyboardType="numeric"
+                      maxLength={3}
+                      accessibilityLabel="Mock battery state of charge"
+                    />
+                    <Input
+                      label="Battery Power (W)"
+                      value={devBatteryPower}
+                      onChangeText={setDevBatteryPower}
+                      keyboardType="numeric"
+                      accessibilityLabel="Mock battery power"
+                    />
                   </View>
-
-                  <View style={styles.separator} />
-
-                  {/* Battery Status Selector */}
-                  <View style={styles.column}>
-                    <Text style={styles.rowTitle}>Battery Status</Text>
-                    <View style={styles.durationSelector}>
-                      {['CHARGE', 'DISCHARGE', 'IDLE'].map((status) => (
-                        <TouchableOpacity
-                          key={status}
-                          style={[
-                            styles.durationButton,
-                            devBatteryStatus === status && styles.durationButtonActive,
-                            { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }
-                          ]}
-                          onPress={() => setDevBatteryStatus(status)}
-                        >
-                          {status === 'CHARGE' ? (
-                            <BatteryCharging size={14} color={devBatteryStatus === status ? Colors.textInverse : Colors.blue} />
-                          ) : status === 'DISCHARGE' ? (
-                            <Battery size={14} color={devBatteryStatus === status ? Colors.textInverse : Colors.amber} />
-                          ) : (
-                            <Pause size={14} color={devBatteryStatus === status ? Colors.textInverse : Colors.textSecondary} />
-                          )}
-                          <Text
-                            style={[
-                              styles.durationText,
-                              devBatteryStatus === status && styles.durationTextActive,
-                            ]}
-                          >
-                            {status === 'CHARGE' ? 'Charging' : status === 'DISCHARGE' ? 'Discharging' : 'Idle'}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
+                  <View style={styles.devInputGrid}>
+                    <Input
+                      label="Solar PV (W)"
+                      value={devPvPower}
+                      onChangeText={setDevPvPower}
+                      keyboardType="numeric"
+                      accessibilityLabel="Mock solar power"
+                    />
+                    <Input
+                      label="House Load (W)"
+                      value={devUsePower}
+                      onChangeText={setDevUsePower}
+                      keyboardType="numeric"
+                      accessibilityLabel="Mock house load"
+                    />
                   </View>
-
-                  <View style={styles.separator} />
-
-                  {/* Grid inputs */}
-                  <View style={styles.developerInputGrid}>
-                    <View style={styles.devInputCol}>
-                      <Text style={styles.inputLabel}>Battery SoC (%)</Text>
-                      <TextInput
-                        style={styles.devTextInput}
-                        value={devBatterySoc}
-                        onChangeText={setDevBatterySoc}
-                        keyboardType="numeric"
-                        maxLength={3}
-                      />
-                    </View>
-                    <View style={styles.devInputCol}>
-                      <Text style={styles.inputLabel}>Battery Power (W)</Text>
-                      <TextInput
-                        style={styles.devTextInput}
-                        value={devBatteryPower}
-                        onChangeText={setDevBatteryPower}
-                        keyboardType="numeric"
-                      />
-                    </View>
-                  </View>
-
-                  <View style={styles.developerInputGrid}>
-                    <View style={styles.devInputCol}>
-                      <Text style={styles.inputLabel}>Solar PV (W)</Text>
-                      <TextInput
-                        style={styles.devTextInput}
-                        value={devPvPower}
-                        onChangeText={setDevPvPower}
-                        keyboardType="numeric"
-                      />
-                    </View>
-                    <View style={styles.devInputCol}>
-                      <Text style={styles.inputLabel}>House Load (W)</Text>
-                      <TextInput
-                        style={styles.devTextInput}
-                        value={devUsePower}
-                        onChangeText={setDevUsePower}
-                        keyboardType="numeric"
-                      />
-                    </View>
-                  </View>
-
-                  {/* Scheduling Overrides */}
-                  <View style={styles.separator} />
-                  <Text style={styles.rowTitle}>Schedule Event (seconds from now)</Text>
-                  
-                  <View style={styles.developerInputGrid}>
-                    <View style={styles.devInputCol}>
-                      <Text style={styles.inputLabel}>Power Cut (s)</Text>
-                      <TextInput
-                        style={styles.devTextInput}
-                        value={devScheduledPowerCutSeconds}
-                        onChangeText={setDevScheduledPowerCutSeconds}
-                        keyboardType="numeric"
-                        placeholder="e.g. 15"
-                        placeholderTextColor={Colors.textMuted}
-                      />
-                    </View>
-                    <View style={styles.devInputCol}>
-                      <Text style={styles.inputLabel}>Power On (s)</Text>
-                      <TextInput
-                        style={styles.devTextInput}
-                        value={devScheduledPowerOnSeconds}
-                        onChangeText={setDevScheduledPowerOnSeconds}
-                        keyboardType="numeric"
-                        placeholder="e.g. 30"
-                        placeholderTextColor={Colors.textMuted}
-                      />
-                    </View>
+                  <RowDivider />
+                  <Text style={[styles.devScheduleLabel, { color: colors.textPrimary }]}>
+                    Schedule Event (seconds from now)
+                  </Text>
+                  <View style={styles.devInputGrid}>
+                    <Input
+                      label="Power Cut (s)"
+                      value={devScheduledPowerCutSeconds}
+                      onChangeText={setDevScheduledPowerCutSeconds}
+                      keyboardType="numeric"
+                      placeholder="e.g. 15"
+                      accessibilityLabel="Scheduled power cut in seconds"
+                    />
+                    <Input
+                      label="Power On (s)"
+                      value={devScheduledPowerOnSeconds}
+                      onChangeText={setDevScheduledPowerOnSeconds}
+                      keyboardType="numeric"
+                      placeholder="e.g. 30"
+                      accessibilityLabel="Scheduled power on in seconds"
+                    />
                   </View>
                 </View>
-              )}
-            </View>
+              ) : null}
+            </Card>
           </View>
-        )}
+        ) : null}
 
-        {/* SAVE BUTTON */}
-        <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-            <Save size={18} color={Colors.textInverse} />
-            <Text style={styles.saveBtnText}>Save Preferences</Text>
-          </View>
-        </TouchableOpacity>
+        {/* SAVE */}
+        <Button label="Save Preferences" onPress={handleSave} full style={{ marginTop: Spacing.md }} />
 
         {/* ABOUT ROW */}
         <TouchableOpacity
-          style={styles.aboutRowBtn}
           onPress={() => navigation.navigate('About')}
+          accessibilityRole="button"
+          accessibilityLabel="About SolarGuard"
+          style={[styles.aboutRow, { backgroundColor: colors.surface1, borderColor: colors.border }]}
         >
-          <View style={styles.aboutRowContent}>
-            <Text style={styles.aboutRowText}>About SolarGuard</Text>
-            <Text style={styles.aboutRowArrow}>→</Text>
-          </View>
+          <Text style={[styles.aboutRowText, { color: colors.textPrimary }]}>About SolarGuard</Text>
+          <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2} />
         </TouchableOpacity>
 
         {/* LOGOUT */}
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-            <LogOut size={18} color={Colors.dangerLight} />
-            <Text style={styles.logoutBtnText}>Sign Out of SolarOS</Text>
-          </View>
-        </TouchableOpacity>
+        <Button
+          label="Sign Out of SolarOS"
+          variant="ghost"
+          icon={<LogOut size={16} color={colors.dangerText} strokeWidth={2} />}
+          full
+          style={[styles.logoutBtn, { borderColor: colors.dangerBorder }]}
+          onPress={handleLogout}
+        />
 
-        <Text style={styles.footerDisclaimer}>
+        <Text style={[styles.footerDisclaimer, { color: colors.textDisabled }]}>
           SolarGuard is an independent companion app and is not affiliated with or endorsed by SolarOS.
         </Text>
-
       </ScrollView>
-    </SafeAreaView>
+      <SafeAreaView edges={['bottom']} style={{ backgroundColor: colors.background }} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   scroll: {
-    paddingHorizontal: Spacing['2xl'],
-    paddingBottom: Spacing['4xl'],
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: Spacing.xl,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.divider,
-    marginBottom: Spacing.xl,
-  },
-  backButton: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.glassLight,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-  },
-  backButtonText: {
-    color: Colors.textPrimary,
-    fontSize: 18,
-    lineHeight: 18,
-    fontWeight: 'bold',
-  },
-  headerTitle: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.lg,
-    color: Colors.textPrimary,
+    paddingHorizontal: PAGE_GUTTER,
+    paddingBottom: Spacing['2xl'],
   },
   section: {
     marginBottom: Spacing.xl,
   },
-  sectionHeader: {
-    fontFamily: Typography.fontFamily.bold,
+  inlineValue: {
+    fontFamily: Typography.fontFamily.monoMedium,
     fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: Spacing.sm,
+    fontVariant: ['tabular-nums'],
   },
-  card: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.xl,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    padding: Spacing.lg,
-    ...Shadows.card,
-  },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: Spacing.sm,
-  },
-  rowInfo: {
-    flex: 1,
-    paddingRight: Spacing.md,
-  },
-  rowTitle: {
-    fontFamily: Typography.fontFamily.semiBold,
-    fontSize: Typography.fontSize.base,
-    color: Colors.textPrimary,
-  },
-  rowSub: {
-    fontFamily: Typography.fontFamily.regular,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textMuted,
-    marginTop: 2,
-  },
-  column: {
-    paddingVertical: Spacing.sm,
-  },
-  separator: {
-    height: 1,
-    backgroundColor: Colors.divider,
-    marginVertical: Spacing.xs,
-  },
-  durationSelector: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    marginTop: Spacing.sm,
-  },
-  durationButton: {
-    flex: 1,
-    paddingVertical: Spacing.sm,
-    backgroundColor: Colors.glassLight,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    borderRadius: BorderRadius.md,
-    alignItems: 'center',
-  },
-  durationButtonActive: {
-    backgroundColor: Colors.amber,
-    borderColor: Colors.amber,
-  },
-  durationText: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
-  },
-  durationTextActive: {
-    color: Colors.textInverse,
-  },
-  thresholdInputRow: {
+  thresholdRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: Spacing.md,
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.divider,
   },
   thresholdLabel: {
     fontFamily: Typography.fontFamily.medium,
     fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
   },
-  thresholdInput: {
-    width: 60,
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs,
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.base,
-    color: Colors.textPrimary,
-    textAlign: 'center',
-  },
-  saveBtn: {
-    backgroundColor: Colors.amber,
-    borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.md,
-    alignItems: 'center',
-    marginTop: Spacing.md,
-    ...Shadows.amber,
-  },
-  saveBtnText: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.base,
-    color: Colors.textInverse,
-  },
-  logoutBtn: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: Colors.dangerGlow,
-    borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.md,
-    alignItems: 'center',
-    marginTop: Spacing.lg,
-  },
-  logoutBtnText: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.base,
-    color: Colors.dangerLight,
-  },
-  stationSelector: {
+  stationList: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.sm,
     marginTop: Spacing.sm,
-    marginBottom: Spacing.xs,
   },
-  stationButton: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    backgroundColor: Colors.glassLight,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    borderRadius: BorderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stationButtonActive: {
-    backgroundColor: Colors.amber,
-    borderColor: Colors.amber,
-  },
-  stationText: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
-  },
-  stationTextActive: {
-    color: Colors.textInverse,
-    fontFamily: Typography.fontFamily.bold,
-  },
-  capacityInputContainer: {
+  stationChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: BorderRadius.md,
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    paddingHorizontal: Spacing.sm,
+    minHeight: 40,
   },
-  capacityInput: {
-    width: 60,
-    paddingVertical: Spacing.xs,
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.base,
-    color: Colors.textPrimary,
-    textAlign: 'center',
+  stationChipText: {
+    fontFamily: Typography.fontFamily.semiBold,
+    fontSize: Typography.fontSize.sm,
   },
-  capacityUnit: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textMuted,
-    marginLeft: 2,
-  },
-  quietHoursInputRow: {
+  quietRow: {
     flexDirection: 'row',
     gap: Spacing.lg,
     marginTop: Spacing.md,
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.divider,
   },
-  timeInputBlock: {
-    flex: 1,
-  },
-  timeInputLabel: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textSecondary,
-    marginBottom: Spacing.xs,
-  },
-  timeTextInput: {
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.base,
-    color: Colors.textPrimary,
-    textAlign: 'center',
-  },
-  testAlarmBtn: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    backgroundColor: Colors.dangerGlow,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.danger + '44',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  testAlarmBtnText: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.dangerLight,
-  },
-  developerSubSection: {
-    marginTop: Spacing.md,
-  },
-  developerInputGrid: {
+  zoneInputGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     gap: Spacing.md,
     marginTop: Spacing.md,
   },
-  devInputCol: {
-    flex: 1,
+  zoneRadiusRow: {
+    marginTop: Spacing.md,
+    alignItems: 'flex-start',
   },
-  inputLabel: {
-    fontFamily: Typography.fontFamily.medium,
+  zoneHint: {
+    fontFamily: Typography.fontFamily.regular,
     fontSize: Typography.fontSize.xs,
-    color: Colors.textSecondary,
-    marginBottom: Spacing.xs,
+    marginTop: Spacing.md,
+    lineHeight: 15,
   },
-  devTextInput: {
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.base,
-    color: Colors.textPrimary,
-    textAlign: 'center',
-  },
-  soundSelector: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.sm,
-    marginTop: Spacing.sm,
-  },
-  soundButton: {
-    flex: 1,
-    minWidth: '45%', // two buttons per row
-    backgroundColor: Colors.surfaceElevated,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    paddingVertical: Spacing.sm,
-    alignItems: 'center',
-  },
-  soundButtonActive: {
-    backgroundColor: Colors.amberGlow,
-    borderColor: Colors.amber + '44',
-  },
-  soundText: {
-    fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.sm,
-    color: Colors.textMuted,
-  },
-  soundTextActive: {
-    color: Colors.amberLight,
-    fontFamily: Typography.fontFamily.bold,
-  },
-  aboutRowBtn: {
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.xl,
-    marginTop: Spacing.xl,
-    marginBottom: Spacing.sm,
-    ...Shadows.card,
-  },
-  aboutRowContent: {
+  diagCard: {},
+  diagHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: Spacing.sm,
   },
-  aboutRowText: {
-    fontFamily: Typography.fontFamily.bold,
+  diagTitle: {
+    fontFamily: Typography.fontFamily.semiBold,
     fontSize: Typography.fontSize.base,
-    color: Colors.textPrimary,
   },
-  aboutRowArrow: {
-    fontSize: Typography.fontSize.base,
-    color: Colors.textMuted,
+  diagStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
   },
-  footerDisclaimer: {
-    fontFamily: Typography.fontFamily.regular,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textMuted,
-    textAlign: 'center',
-    marginTop: Spacing.xl,
-    marginBottom: Spacing.md,
-    lineHeight: 16,
-  },
-  grantedBadge: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs,
-    backgroundColor: Colors.successGlow,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
-    borderColor: Colors.success,
-  },
-  grantedBadgeText: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.successLight,
-  },
-  permissionBtn: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    backgroundColor: Colors.amberGlow,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.amber + '44',
-  },
-  permissionBtnText: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.amberLight,
-  },
-  configureBtn: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    backgroundColor: Colors.glassLight,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-  },
-  configureBtnText: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textPrimary,
+  diagStatusText: {
+    fontFamily: Typography.fontFamily.semiBold,
+    fontSize: Typography.fontSize.sm,
   },
   diagRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: Spacing.xs,
+    paddingVertical: 6,
   },
   diagLabel: {
     fontFamily: Typography.fontFamily.medium,
     fontSize: Typography.fontSize.sm,
-    color: Colors.textSecondary,
   },
   diagValue: {
-    fontFamily: Typography.fontFamily.bold,
+    fontFamily: Typography.fontFamily.monoMedium,
     fontSize: Typography.fontSize.sm,
-    color: Colors.textPrimary,
+    fontVariant: ['tabular-nums'],
   },
   diagSeparator: {
     height: 1,
-    backgroundColor: Colors.divider,
-    marginVertical: Spacing.xs,
+  },
+  devSection: {
+    marginTop: Spacing.sm,
+  },
+  devInputGrid: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+    marginTop: Spacing.md,
+  },
+  devScheduleLabel: {
+    fontFamily: Typography.fontFamily.medium,
+    fontSize: Typography.fontSize.base,
+  },
+  aboutRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    marginTop: Spacing.xl,
+    marginBottom: Spacing.sm,
+    minHeight: 52,
+  },
+  aboutRowText: {
+    fontFamily: Typography.fontFamily.semiBold,
+    fontSize: Typography.fontSize.base,
+  },
+  logoutBtn: {
+    marginTop: Spacing.sm,
+  },
+  footerDisclaimer: {
+    fontFamily: Typography.fontFamily.regular,
+    fontSize: Typography.fontSize.xs,
+    textAlign: 'center',
+    marginTop: Spacing.xl,
+    marginBottom: Spacing.md,
+    lineHeight: 15,
   },
 });

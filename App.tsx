@@ -6,30 +6,25 @@ import { Text, View, StyleSheet, ActivityIndicator, Platform, Dimensions } from 
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useNavigation } from '@react-navigation/native';
+import { useFonts } from 'expo-font';
 
 import { AppContextProvider, useApp } from './src/context/AppContext';
+import { ThemeProvider, useTheme, FontResources, Typography } from './src/theme';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { HistoryScreen } from './src/screens/HistoryScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { AnalyticsScreen } from './src/screens/AnalyticsScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
-import { Colors, Typography, Spacing } from './src/theme';
 import { LayoutDashboard, History, ChartColumn, SunMedium } from 'lucide-react-native';
 
-// Import background task definition so it registers at module load
+// Import background task definitions so they register at module load
 import './src/services/foregroundService';
+// Headless geofence ENTER/EXIT + remote background-fetch poll task definitions
+import './src/services/geofenceTasks';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
-
-function TabIcon({ icon, focused }: { icon: React.ReactNode; focused: boolean }) {
-  return (
-    <View style={[tabStyles.iconWrap, focused && tabStyles.iconWrapActive]}>
-      {icon}
-    </View>
-  );
-}
 
 const tabNames = ['Dashboard', 'History', 'Analytics'];
 
@@ -48,6 +43,7 @@ const footerHeight = 90; // Ignore swipes in bottom 90px tab bar
 
 function MainTabs() {
   const navigation = useNavigation<any>();
+  const { colors } = useTheme();
 
   const swipeGesture = Gesture.Pan()
     .runOnJS(true)
@@ -61,7 +57,6 @@ function MainTabs() {
 
       const threshold = 60; // minimum translation to switch tabs
       if (event.translationX > threshold) {
-        // Swipe right (finger moves left-to-right) -> Previous screen (idx - 1)
         const state = navigation.getState();
         const activeName = getActiveRouteName(state);
         const idx = tabNames.indexOf(activeName);
@@ -69,7 +64,6 @@ function MainTabs() {
           navigation.navigate('MainTabs', { screen: tabNames[idx - 1] });
         }
       } else if (event.translationX < -threshold) {
-        // Swipe left (finger moves right-to-left) -> Next screen (idx + 1)
         const state = navigation.getState();
         const activeName = getActiveRouteName(state);
         const idx = tabNames.indexOf(activeName);
@@ -85,9 +79,9 @@ function MainTabs() {
         <Tab.Navigator
           screenOptions={{
             headerShown: false,
-            tabBarStyle: styles.tabBar,
-            tabBarActiveTintColor: Colors.amber,
-            tabBarInactiveTintColor: Colors.textMuted,
+            tabBarStyle: [styles.tabBar, { backgroundColor: colors.background, borderTopColor: colors.divider }],
+            tabBarActiveTintColor: colors.brand,
+            tabBarInactiveTintColor: colors.textDisabled,
             tabBarShowLabel: true,
             tabBarLabelStyle: styles.tabBarLabel,
             freezeOnBlur: true,
@@ -98,10 +92,10 @@ function MainTabs() {
             component={DashboardScreen}
             options={{
               tabBarIcon: ({ focused }) => (
-                <TabIcon
-                  icon={<LayoutDashboard size={20} color={focused ? Colors.amber : Colors.textMuted} />}
-                  focused={focused}
-                />
+                <View style={styles.tabIconWrap}>
+                  {focused && <View style={[styles.tabIndicator, { backgroundColor: colors.brand }]} />}
+                  <LayoutDashboard size={20} color={focused ? colors.brand : colors.textDisabled} />
+                </View>
               ),
               tabBarLabel: 'Dashboard',
             }}
@@ -111,10 +105,10 @@ function MainTabs() {
             component={HistoryScreen}
             options={{
               tabBarIcon: ({ focused }) => (
-                <TabIcon
-                  icon={<History size={20} color={focused ? Colors.amber : Colors.textMuted} />}
-                  focused={focused}
-                />
+                <View style={styles.tabIconWrap}>
+                  {focused && <View style={[styles.tabIndicator, { backgroundColor: colors.brand }]} />}
+                  <History size={20} color={focused ? colors.brand : colors.textDisabled} />
+                </View>
               ),
               tabBarLabel: 'History',
             }}
@@ -124,10 +118,10 @@ function MainTabs() {
             component={AnalyticsScreen}
             options={{
               tabBarIcon: ({ focused }) => (
-                <TabIcon
-                  icon={<ChartColumn size={20} color={focused ? Colors.amber : Colors.textMuted} />}
-                  focused={focused}
-                />
+                <View style={styles.tabIconWrap}>
+                  {focused && <View style={[styles.tabIndicator, { backgroundColor: colors.brand }]} />}
+                  <ChartColumn size={20} color={focused ? colors.brand : colors.textDisabled} />
+                </View>
               ),
               tabBarLabel: 'Analytics',
             }}
@@ -139,18 +133,15 @@ function MainTabs() {
 }
 
 function AppNavigator() {
-  const { isLoggedIn, isAuthLoading, settings } = useApp();
+  const { isLoggedIn, isAuthLoading } = useApp();
+  const { colors } = useTheme();
 
   if (isAuthLoading) {
     return (
-      <View style={styles.splashContainer}>
-        <SunMedium size={72} color={Colors.amber} style={{ marginBottom: Spacing.base }} />
-        <Text style={styles.splashTitle}>SolarGuard</Text>
-        <ActivityIndicator
-          color={Colors.amber}
-          size="large"
-          style={{ marginTop: Spacing.lg }}
-        />
+      <View style={[styles.splashContainer, { backgroundColor: colors.background }]}>
+        <SunMedium size={72} color={colors.brand} style={{ marginBottom: 16 }} />
+        <Text style={[styles.splashTitle, { color: colors.textPrimary }]}>SolarGuard</Text>
+        <ActivityIndicator color={colors.brand} size="large" style={{ marginTop: 20 }} />
       </View>
     );
   }
@@ -159,19 +150,17 @@ function AppNavigator() {
     return <LoginScreen />;
   }
 
-  const isAmoled = settings?.amoledTheme ?? false;
-
   return (
     <NavigationContainer
       theme={{
         dark: true,
         colors: {
-          primary: Colors.amber,
-          background: isAmoled ? '#000000' : Colors.background,
-          card: isAmoled ? '#000000' : Colors.surface,
-          text: Colors.textPrimary,
-          border: Colors.divider,
-          notification: Colors.danger,
+          primary: colors.brand,
+          background: colors.background,
+          card: colors.surface1,
+          text: colors.textPrimary,
+          border: colors.divider,
+          notification: colors.danger,
         },
         fonts: {
           regular: { fontFamily: Typography.fontFamily.regular, fontWeight: 'normal' },
@@ -196,11 +185,26 @@ function AppNavigator() {
 }
 
 export default function App() {
+  // Fonts gate the whole tree — no silent system-font fallbacks
+  const [fontsLoaded] = useFonts(FontResources);
+
+  if (!fontsLoaded) {
+    return (
+      <View style={styles.splashContainer}>
+        <SunMedium size={72} color="#F5A623" style={{ marginBottom: 16 }} />
+        <Text style={styles.splashTitle}>SolarGuard</Text>
+        <ActivityIndicator color="#F5A623" size="large" style={{ marginTop: 20 }} />
+      </View>
+    );
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <AppContextProvider>
-          <AppNavigator />
+          <ThemeProvider>
+            <AppNavigator />
+          </ThemeProvider>
         </AppContextProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
@@ -210,49 +214,39 @@ export default function App() {
 const styles = StyleSheet.create({
   splashContainer: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: '#0B0F1A',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  splashIcon: {
-    fontSize: 72,
-    marginBottom: Spacing.base,
-  },
   splashTitle: {
-    fontFamily: Typography.fontFamily.bold,
-    fontSize: Typography.fontSize['4xl'],
-    color: Colors.textPrimary,
+    fontFamily: 'Grotesk-Bold',
+    fontSize: 36,
+    color: '#F2F5FA',
     letterSpacing: -1,
   },
   tabBar: {
-    backgroundColor: Colors.surface,
-    borderTopColor: Colors.divider,
     borderTopWidth: 1,
-    paddingTop: Spacing.xs,
-    paddingBottom: Platform.OS === 'ios' ? Spacing.sm : Spacing.xs,
+    paddingTop: 8,
+    height: 60,
+    paddingBottom: Platform.OS === 'ios' ? 12 : 8,
   },
   tabBarLabel: {
     fontFamily: Typography.fontFamily.medium,
-    fontSize: Typography.fontSize.xs,
+    fontSize: 11,
     marginTop: 2,
   },
-});
-
-const tabStyles = StyleSheet.create({
-  iconWrap: {
-    width: 36,
-    height: 28,
-    borderRadius: 14,
+  tabIconWrap: {
+    width: 44,
+    height: 30,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconWrapActive: {
-    backgroundColor: Colors.amberGlow,
-  },
-  icon: {
-    fontSize: 20,
-  },
-  iconActive: {
-    // Active icons appear brighter via the container glow
+  // Instrument-panel indicator bar over the active tab
+  tabIndicator: {
+    position: 'absolute',
+    top: -8,
+    width: 24,
+    height: 2.5,
+    borderRadius: 2,
   },
 });

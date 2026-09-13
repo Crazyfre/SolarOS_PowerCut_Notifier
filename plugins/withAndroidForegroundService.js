@@ -1,25 +1,25 @@
 const { withAndroidManifest } = require('@expo/config-plugins');
 
 /**
- * Expo Config Plugin to override the foregroundServiceType on the Notifee
+ * Expo Config Plugin to manage the foregroundServiceType on the Notifee
  * core ForegroundService declared in the Notifee AAR manifest.
  *
  * The Notifee prebuilt AAR (core-202108261754.aar) ships with:
  *   android:foregroundServiceType="shortService"
  *
  * SHORT_SERVICE has a hard ANR timeout (~3 min on Android 14+) and is
- * incompatible with SolarGuard's continuously-running telemetry monitor.
+ * incompatible with SolarGuard's monitoring service.
  *
- * This plugin targets the actual runtime class name declared in the AAR
- * ("app.notifee.core.ForegroundService") and overrides the type to
- * "dataSync", which is the correct type for a service that continuously
- * polls a remote API to sync state.
+ * The manifest entry lists BOTH "dataSync|location" so that:
+ *  - 'always' mode notifications (dataSync) keep the legacy type, and
+ *  - 'geofenced' mode notifications pass
+ *    foregroundServiceTypes: ['location'] at runtime (see
+ *    src/services/foregroundService.ts), which is valid because the type is
+ *    a subset of the declared manifest types. The actual type applied to the
+ *    FGS at runtime comes from each notification's config, NOT from this
+ *    manifest attribute.
  *
  * IMPORTANT: The class name must match the AAR's declaration exactly.
- * The previously used name "io.invertase.notifee.NotifeeForegroundService"
- * was wrong — it never matched any real entry in the merged manifest, so
- * the tools:replace directive was silently a no-op and shortService survived
- * into the final APK, causing the ANR.
  */
 function withAndroidForegroundService(config) {
   return withAndroidManifest(config, async (config) => {
@@ -49,13 +49,13 @@ function withAndroidForegroundService(config) {
       services.push(notifeeService);
     }
 
-    // Override the shortService type from the Notifee AAR with dataSync.
-    // dataSync is appropriate for a service that continuously fetches data
-    // from a remote source (solar telemetry API) without a timeout constraint.
-    notifeeService.$['android:foregroundServiceType'] = 'dataSync';
+    // Declare both dataSync (legacy/always mode) and location (geofenced mode)
+    // as permitted types for this service. Runtime notification config decides
+    // which one is active for a given foreground session.
+    notifeeService.$['android:foregroundServiceType'] = 'dataSync|location';
     notifeeService.$['tools:replace'] = 'android:foregroundServiceType';
 
-    // Remove any stale specialUse property — not needed for dataSync type.
+    // Remove any stale specialUse property — not needed.
     delete notifeeService.property;
 
     // Add tools namespace to manifest element if missing
