@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, memo } from 'react';
 import {
   View,
   Text,
@@ -8,12 +8,13 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Linking,
+  AppState,
 } from 'react-native';
 import { useApp } from '../context/AppContext';
 import { useTheme, Typography, Spacing, PAGE_GUTTER } from '../theme';
 import { StatusCard } from '../components/StatusCard';
 import { PowerFlowDiagram } from '../components/PowerFlowDiagram';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { Store } from '../storage/secureStore';
 import { isRunningInExpoGo } from '../services/notifications';
 import { GeofenceStore } from '../storage/geofenceStore';
@@ -56,13 +57,89 @@ function formatPower(watts: number): string {
   return `${Math.round(watts)} W`;
 }
 
+function useVisualClock(timestamp: number | null) {
+  const [nowTick, setNowTick] = useState(Date.now);
+  const isFocused = useIsFocused();
+
+  useEffect(() => {
+    if (!isFocused || !timestamp) return;
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const sync = (state: typeof AppState.currentState) => {
+      if (interval !== undefined) {
+        clearInterval(interval);
+        interval = undefined;
+      }
+      if (state === 'active') {
+        setNowTick(Date.now());
+        interval = setInterval(() => setNowTick(Date.now()), 5000);
+      }
+    };
+    const subscription = AppState.addEventListener('change', sync);
+    sync(AppState.currentState);
+    return () => {
+      if (interval !== undefined) clearInterval(interval);
+      subscription.remove();
+    };
+  }, [isFocused, timestamp]);
+
+  return nowTick;
+}
+
+const DashboardHeader = memo(function DashboardHeader({ lastFetchTime, isFetching }: {
+  lastFetchTime: number | null;
+  isFetching: boolean;
+}) {
+  const { colors } = useTheme();
+  const navigation = useNavigation<any>();
+  const nowTick = useVisualClock(lastFetchTime);
+  let subtitle = 'Connecting…';
+  if (lastFetchTime) {
+    const diffSecs = Math.floor((nowTick - lastFetchTime) / 1000);
+    const diffMins = Math.floor(diffSecs / 60);
+    const timeAgoStr = diffSecs < 10 ? 'just now'
+      : diffSecs < 60 ? `${diffSecs}s ago`
+        : diffMins < 60 ? `${diffMins} min ago`
+          : new Date(lastFetchTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    subtitle = `Updated ${timeAgoStr}`;
+  }
+
+  return (
+    <ScreenHeader
+      title="SolarGuard"
+      subtitle={subtitle}
+      right={
+        <View style={styles.headerActions}>
+          {isFetching ? (
+            <ActivityIndicator size="small" color={colors.brand} style={{ marginRight: Spacing.sm }} />
+          ) : null}
+          <HeaderAction
+            onPress={() => navigation.navigate('Settings')}
+            icon={<Settings size={20} color={colors.textPrimary} strokeWidth={2} />}
+            accessibilityLabel="Settings"
+            testID="settings-button"
+          />
+        </View>
+      }
+    />
+  );
+});
+
+const OngoingElapsed = memo(function OngoingElapsed({ outageStart }: { outageStart: number | null }) {
+  const nowTick = useVisualClock(outageStart);
+
+  if (!outageStart) return <Text>—</Text>;
+  const secs = Math.max(0, Math.floor((nowTick - outageStart) / 1000));
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return <Text>{`${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`}</Text>;
+  return <Text>{`${m}:${String(s).padStart(2, '0')}`}</Text>;
+});
+
 export function DashboardScreen() {
   const { telemetry, isFetching, fetchError, refreshTelemetry, lastFetchTime, updateInfo, settings, logout } = useApp();
   const { colors } = useTheme();
-  const navigation = useNavigation<any>();
   const [outageStart, setOutageStart] = useState<number | null>(null);
-  const [timeAgoStr, setTimeAgoStr] = useState('just now');
-  const [nowTick, setNowTick] = useState(Date.now());
   const [diagExpanded, setDiagExpanded] = useState(false);
   const [zoneState, setZoneState] = useState<{ inside: boolean | null } | null>(null);
 
@@ -92,8 +169,6 @@ export function DashboardScreen() {
     };
   }, [isGeofenced, telemetry]);
 
-  // ─── Outage start time + live tick (elapsed timer + "updated X ago") ───
-
   useEffect(() => {
     Store.getOutageStartTime().then(setOutageStart);
   }, [telemetry]);
@@ -103,27 +178,6 @@ export function DashboardScreen() {
     const ts = await Store.getOutageStartTime();
     setOutageStart(ts);
   }, [refreshTelemetry]);
-
-  useEffect(() => {
-    const update = () => {
-      setNowTick(Date.now());
-      if (lastFetchTime) {
-        const diffSecs = Math.floor((Date.now() - lastFetchTime) / 1000);
-        if (diffSecs < 10) setTimeAgoStr('just now');
-        else if (diffSecs < 60) setTimeAgoStr(`${diffSecs}s ago`);
-        else {
-          const diffMins = Math.floor(diffSecs / 60);
-          if (diffMins < 60) setTimeAgoStr(`${diffMins} min ago`);
-          else setTimeAgoStr(new Date(lastFetchTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-        }
-      } else {
-        setTimeAgoStr('Connecting…');
-      }
-    };
-    update();
-    const interval = setInterval(update, 5000);
-    return () => clearInterval(interval);
-  }, [lastFetchTime]);
 
   // ─── Derived values ──────────────────────────────────────────────────────
 
@@ -142,16 +196,6 @@ export function DashboardScreen() {
     const m = totalMins % 60;
     if (h > 0) return `${h}h ${m}m`;
     return `${m}m`;
-  };
-
-  const getElapsedOutageText = (): string => {
-    if (!outageStart) return '—';
-    const secs = Math.max(0, Math.floor((nowTick - outageStart) / 1000));
-    const h = Math.floor(secs / 3600);
-    const m = Math.floor((secs % 3600) / 60);
-    const s = secs % 60;
-    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    return `${m}:${String(s).padStart(2, '0')}`;
   };
 
   const getBatteryHealth = () => {
@@ -175,7 +219,7 @@ export function DashboardScreen() {
     variant: BannerVariant;
     title: string;
     subtitle?: string;
-    metrics?: { label: string; value: string }[];
+    metrics?: { label: string; value: React.ReactNode }[];
     actions?: { label: string; onPress: () => void }[];
     onPress?: () => void;
     infoTone?: 'info' | 'brand';
@@ -186,7 +230,7 @@ export function DashboardScreen() {
         title: 'Battery Critical',
         subtitle: 'Grid offline — battery below warning threshold.',
         metrics: [
-          { label: 'Elapsed', value: getElapsedOutageText() },
+          { label: 'Elapsed', value: <OngoingElapsed outageStart={outageStart} /> },
           { label: 'Charge', value: `${telemetry.batterySoc ?? 0}%` },
           { label: 'Remaining', value: getBackupTimeText() },
         ],
@@ -208,7 +252,7 @@ export function DashboardScreen() {
           ? 'Grid offline — you are outside your home zone, alarm is notification-only.'
           : 'Grid offline — the house is running on stored energy.',
         metrics: [
-          { label: 'Elapsed', value: getElapsedOutageText() },
+          { label: 'Elapsed', value: <OngoingElapsed outageStart={outageStart} /> },
           { label: 'Charge', value: `${telemetry.batterySoc ?? 0}%` },
           { label: 'Remaining', value: getBackupTimeText() },
         ],
@@ -287,23 +331,7 @@ export function DashboardScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <ScreenHeader
-        title="SolarGuard"
-        subtitle={lastFetchTime ? `Updated ${timeAgoStr}` : 'Connecting…'}
-        right={
-          <View style={styles.headerActions}>
-            {isFetching ? (
-              <ActivityIndicator size="small" color={colors.brand} style={{ marginRight: Spacing.sm }} />
-            ) : null}
-            <HeaderAction
-              onPress={() => navigation.navigate('Settings')}
-              icon={<Settings size={20} color={colors.textPrimary} strokeWidth={2} />}
-              accessibilityLabel="Settings"
-              testID="settings-button"
-            />
-          </View>
-        }
-      />
+      <DashboardHeader lastFetchTime={lastFetchTime} isFetching={isFetching} />
 
       <ScrollView
         style={styles.scroll}

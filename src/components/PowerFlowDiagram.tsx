@@ -11,8 +11,9 @@
 // positioned in scaled canvas space; label offsets scale with the canvas so
 // the layout stays proportional on any screen width.
 
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Easing, useWindowDimensions } from 'react-native';
+import React, { useEffect, useRef, useState, memo } from 'react';
+import { View, Text, StyleSheet, Animated, Easing, useWindowDimensions, AppState } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import Svg, { Circle, Line } from 'react-native-svg';
 import { useTheme, withAlpha, Typography } from '../theme';
 import {
@@ -76,6 +77,7 @@ function FlowDot({
   delay = 0,
   speed = 45,
   scale = 1,
+  active = true,
 }: {
   color: string;
   x1: number; y1: number;
@@ -83,33 +85,35 @@ function FlowDot({
   delay?: number;
   speed?: number;
   scale?: number;
+  active?: boolean;
 }) {
   const anim = useRef(new Animated.Value(0)).current;
+  const duration = (Math.hypot(x2 - x1, y2 - y1) / speed) * 1000;
+  const cycleDuration = duration + delay;
+  const inputRange = delay > 0 ? [0, delay / cycleDuration, 1] : [0, 1];
 
   useEffect(() => {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    const duration = (distance / speed) * 1000;
-
+    if (!active) {
+      anim.stopAnimation();
+      anim.setValue(0);
+      return;
+    }
+    anim.setValue(0);
     const loop = Animated.loop(
-      Animated.sequence([
-        Animated.delay(delay),
-        Animated.timing(anim, {
-          toValue: 1,
-          duration,
-          easing: Easing.linear,
-          useNativeDriver: false,
-        }),
-        Animated.timing(anim, { toValue: 0, duration: 0, useNativeDriver: false }),
-      ])
+      Animated.timing(anim, {
+        toValue: 1,
+        duration: cycleDuration,
+        easing: Easing.linear,
+        useNativeDriver: true,
+        isInteraction: false,
+      })
     );
     loop.start();
     return () => loop.stop();
-  }, [x1, y1, x2, y2, speed, delay, anim]);
+  }, [cycleDuration, anim, active, x1, y1, x2, y2]);
 
-  const cx = anim.interpolate({ inputRange: [0, 1], outputRange: [x1, x2] });
-  const cy = anim.interpolate({ inputRange: [0, 1], outputRange: [y1, y2] });
+  const cx = anim.interpolate({ inputRange, outputRange: delay > 0 ? [x1, x1, x2] : [x1, x2] });
+  const cy = anim.interpolate({ inputRange, outputRange: delay > 0 ? [y1, y1, y2] : [y1, y2] });
 
   return (
     <Animated.View
@@ -124,7 +128,7 @@ function FlowDot({
   );
 }
 
-export function PowerFlowDiagram({
+export const PowerFlowDiagram = memo(function PowerFlowDiagram({
   gridOn,
   pvPower = 0,
   batteryStatus,
@@ -134,6 +138,18 @@ export function PowerFlowDiagram({
 }: PowerFlowProps) {
   const { colors, motion } = useTheme();
   const { width: screenWidth } = useWindowDimensions();
+  const isFocused = useIsFocused();
+  const appState = useRef(AppState.currentState);
+  const [appActive, setAppActive] = useState(appState.current === 'active');
+  const animated = isFocused && appActive;
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      appState.current = state;
+      setAppActive(state === 'active');
+    });
+    return () => sub.remove();
+  }, []);
 
   const isDischarging = batteryStatus === 'DISCHARGE';
   const isCharging = batteryStatus === 'CHARGE';
@@ -161,7 +177,7 @@ export function PowerFlowDiagram({
   // Solar pulse (production is live)
   const solarPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
-    if (pvPower > 0) {
+    if (pvPower > 0 && animated) {
       const loop = Animated.loop(
         Animated.sequence([
           Animated.timing(solarPulse, { toValue: 0.45, duration: 1400, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
@@ -172,7 +188,7 @@ export function PowerFlowDiagram({
       return () => loop.stop();
     }
     solarPulse.setValue(1);
-  }, [pvPower, solarPulse]);
+  }, [pvPower, solarPulse, animated]);
 
   const formatPower = (watts: number) => `${Math.round(watts)}W`;
 
@@ -325,37 +341,37 @@ export function PowerFlowDiagram({
 
         {/* Flow dots (constant speed = real energy transfer) */}
         {gridOn && wirePower > 0 && (
-          <FlowDot color={colors.charge} scale={scale}
+          <FlowDot color={colors.charge} scale={scale} active={animated}
             x1={px(WIRE.gridX1)} y1={px(nodes.grid.y)}
             x2={px(WIRE.gridX2)} y2={px(nodes.inverter.y)}
             speed={motion.flowSpeed * scale} />
         )}
         {gridOn && wirePower < 0 && (
-          <FlowDot color={colors.success} scale={scale}
+          <FlowDot color={colors.success} scale={scale} active={animated}
             x1={px(WIRE.gridX2)} y1={px(nodes.inverter.y)}
             x2={px(WIRE.gridX1)} y2={px(nodes.grid.y)}
             speed={motion.flowSpeed * scale} />
         )}
         {pvPower > 0 && (
-          <FlowDot color={colors.brand} scale={scale} delay={100}
+          <FlowDot color={colors.brand} scale={scale} delay={100} active={animated}
             x1={px(nodes.solar.x)} y1={px(WIRE.solarY1)}
             x2={px(nodes.inverter.x)} y2={px(WIRE.solarY2)}
             speed={motion.flowSpeed * scale} />
         )}
         {usePower > 0 && (
-          <FlowDot color={loadColor} scale={scale} delay={300}
+          <FlowDot color={loadColor} scale={scale} delay={300} active={animated}
             x1={px(WIRE.houseX1)} y1={px(nodes.inverter.y)}
             x2={px(WIRE.houseX2)} y2={px(nodes.house.y)}
             speed={motion.flowSpeed * scale} />
         )}
         {isDischarging && (
-          <FlowDot color={colors.discharge} scale={scale} delay={150}
+          <FlowDot color={colors.discharge} scale={scale} delay={150} active={animated}
             x1={px(nodes.battery.x)} y1={px(WIRE.battY2)}
             x2={px(nodes.inverter.x)} y2={px(WIRE.battY1)}
             speed={motion.flowSpeed * scale} />
         )}
         {isCharging && (
-          <FlowDot color={colors.charge} scale={scale} delay={150}
+          <FlowDot color={colors.charge} scale={scale} delay={150} active={animated}
             x1={px(nodes.inverter.x)} y1={px(WIRE.battY1)}
             x2={px(nodes.battery.x)} y2={px(WIRE.battY2)}
             speed={motion.flowSpeed * scale} />
@@ -363,7 +379,7 @@ export function PowerFlowDiagram({
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

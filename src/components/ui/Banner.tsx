@@ -37,7 +37,7 @@ interface BannerProps {
   title: string;
   subtitle?: string;
   /** mono-formatted metric row (elapsed time, SoC, backup estimate) */
-  metrics?: { label: string; value: string }[];
+  metrics?: { label: string; value: React.ReactNode }[];
   actions?: BannerAction[];
   onPress?: () => void;
   /** visual tone override for info (update=info, expogo=brand) */
@@ -66,7 +66,7 @@ function variantColors(
   }
 }
 
-export function Banner({
+export const Banner = React.memo(function Banner({
   variant,
   title,
   subtitle,
@@ -161,7 +161,7 @@ export function Banner({
       {content}
     </Row>
   );
-}
+});
 
 const styles = StyleSheet.create({
   banner: {

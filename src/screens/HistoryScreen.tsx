@@ -1,5 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
+  type AppStateStatus,
   View,
   Text,
   StyleSheet,
@@ -8,6 +10,7 @@ import {
   Animated,
   Easing,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useApp } from '../context/AppContext';
 import { useTheme, withAlpha, Typography, Spacing, PAGE_GUTTER } from '../theme';
 import { OutageRecord } from '../types/telemetry';
@@ -126,13 +129,45 @@ function BatteryDeclineChart({
   );
 }
 
-function OutageCard({ item }: { item: OutageRecord }) {
+function OngoingDuration({ startTime }: { startTime: number }) {
+  const [now, setNow] = useState(Date.now);
+  const { colors } = useTheme();
+
+  useFocusEffect(useCallback(() => {
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const stop = () => {
+      if (interval !== undefined) {
+        clearInterval(interval);
+        interval = undefined;
+      }
+    };
+    const syncTimer = (state: AppStateStatus) => {
+      stop();
+      if (state === 'active') {
+        setNow(Date.now());
+        interval = setInterval(() => setNow(Date.now()), 1000);
+      }
+    };
+    const subscription = AppState.addEventListener('change', syncTimer);
+    syncTimer(AppState.currentState);
+    return () => {
+      stop();
+      subscription.remove();
+    };
+  }, [startTime]));
+
+  return (
+    <Text style={[styles.timeValue, { color: colors.textPrimary }]}>
+      {formatDuration(now - startTime)}
+    </Text>
+  );
+}
+
+const OutageCard = React.memo(function OutageCard({ item, threshold }: { item: OutageRecord; threshold: number }) {
   const [expanded, setExpanded] = React.useState(false);
-  const { settings } = useApp();
   const { colors } = useTheme();
   const isOngoing = !item.endTime;
   const duration = item.endTime ? item.endTime - item.startTime : undefined;
-  const threshold = settings?.batteryWarningThreshold ?? 20;
 
   const startSoc = 100; // outages begin at grid-cut; detector assumes full battery baseline
   const endSoc = item.minBatterySoc ?? 100;
@@ -199,9 +234,13 @@ function OutageCard({ item }: { item: OutageRecord }) {
               {isOngoing ? 'Duration' : 'End'}
             </Text>
           </View>
-          <Text style={[styles.timeValue, { color: colors.textPrimary }]}>
-            {isOngoing ? formatDuration(Date.now() - item.startTime) : formatTime(item.endTime!)}
-          </Text>
+          {isOngoing ? (
+            <OngoingDuration startTime={item.startTime} />
+          ) : (
+            <Text style={[styles.timeValue, { color: colors.textPrimary }]}>
+              {formatTime(item.endTime!)}
+            </Text>
+          )}
         </View>
       </View>
 
@@ -281,25 +320,17 @@ function OutageCard({ item }: { item: OutageRecord }) {
       ) : null}
     </Card>
   );
-}
+});
 
 export function HistoryScreen() {
-  const { outageHistory, reloadHistory } = useApp();
+  const { outageHistory, reloadHistory, settings } = useApp();
   const { colors } = useTheme();
   const spinValue = useRef(new Animated.Value(0)).current;
-  const [refreshTick, setRefreshTick] = useState(0);
+  const threshold = settings?.batteryWarningThreshold ?? 20;
 
   useEffect(() => {
     reloadHistory();
   }, []);
-
-  // Ongoing outage elapsed timer
-  useEffect(() => {
-    const hasOngoing = outageHistory.some(o => !o.endTime);
-    if (!hasOngoing) return;
-    const t = setInterval(() => setRefreshTick(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [outageHistory]);
 
   const handleRefresh = () => {
     spinValue.setValue(0);
@@ -317,8 +348,10 @@ export function HistoryScreen() {
     outputRange: ['0deg', '360deg'],
   });
 
-  const sortedHistory = [...outageHistory].reverse(); // newest first
-  void refreshTick; // elapsed re-render trigger
+  const sortedHistory = useMemo(() => [...outageHistory].reverse(), [outageHistory]); // newest first
+  const renderItem = useCallback(({ item }: { item: OutageRecord }) => (
+    <OutageCard item={item} threshold={threshold} />
+  ), [threshold]);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -351,7 +384,7 @@ export function HistoryScreen() {
         <FlatList
           data={sortedHistory}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <OutageCard item={item} />}
+          renderItem={renderItem}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
         />
