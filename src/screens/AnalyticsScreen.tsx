@@ -137,13 +137,11 @@ export function AnalyticsScreen() {
   const [monthlyExpanded, setMonthlyExpanded] = useState(false);
   const [lifetimeExpanded, setLifetimeExpanded] = useState(false);
 
-  // Financial summary — the engine already computes it; surface it instead of console
+  // Financial summary — KSEB slab-aware counterfactual savings
   const savings = useMemo(() => {
     if (!telemetry) return null;
-    const importRate = settings?.tariffImportRate ?? 7.5;
-    const exportRate = settings?.tariffExportRate ?? 5.0;
-    return FinancialEngine.summarize(telemetry, importRate, exportRate);
-  }, [telemetry, settings?.tariffImportRate, settings?.tariffExportRate]);
+    return FinancialEngine.computeSavings(telemetry, settings?.tariff ?? FinancialEngine.DEFAULT_TARIFF);
+  }, [telemetry, settings?.tariff]);
 
   const handleDownloadReport = async () => {
     setIsGenerating(true);
@@ -199,7 +197,7 @@ export function AnalyticsScreen() {
       <ScreenHeader title="Analytics" subtitle="Energy generation & usage insights" />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Savings hero — previously computed but only logged to console */}
+        {/* Savings hero — KSEB slab counterfactual */}
         {savings ? (
           <Card style={styles.savingsCard}>
             <View style={styles.savingsHeader}>
@@ -207,29 +205,45 @@ export function AnalyticsScreen() {
               <Text style={[styles.savingsLabel, { color: colors.textSecondary }]}>
                 Estimated Savings
               </Text>
+              {savings.today.estimatedAtRate ? (
+                <Text style={[styles.savingsEstimate, { color: colors.textSecondary }]}>
+                  · est. @ ₹{savings.today.estimatedAtRate.toFixed(2)}/unit
+                </Text>
+              ) : null}
             </View>
             <View style={styles.savingsRow}>
               <View style={styles.savingsCol}>
                 <Text style={[styles.savingsValue, { color: colors.textPrimary }]}>
-                  ₹{savings.today.netSavings.toFixed(0)}
+                  ₹{savings.today.savings.toFixed(0)}
                 </Text>
                 <Text style={[styles.savingsSub, { color: colors.textSecondary }]}>Today</Text>
               </View>
               <View style={styles.savingsDivider} />
               <View style={styles.savingsCol}>
                 <Text style={[styles.savingsValue, { color: colors.textPrimary }]}>
-                  ₹{savings.monthly.netSavings.toFixed(0)}
+                  ₹{savings.monthly.savings.toFixed(0)}
                 </Text>
                 <Text style={[styles.savingsSub, { color: colors.textSecondary }]}>This Month</Text>
               </View>
               <View style={styles.savingsDivider} />
               <View style={styles.savingsCol}>
                 <Text style={[styles.savingsValue, { color: colors.textPrimary }]}>
-                  ₹{savings.lifetime.netSavings.toFixed(0)}
+                  ₹{savings.lifetime.savings.toFixed(0)}
                 </Text>
                 <Text style={[styles.savingsSub, { color: colors.textSecondary }]}>Lifetime</Text>
               </View>
             </View>
+            {savings.bankedSurplusUnits > 0 ? (
+              <Text style={[styles.bankedText, { color: colors.textSecondary }]}>
+                {savings.bankedSurplusUnits} units banked this month — settles 31 Mar at ~₹
+                {(savings.bankedSurplusValue / Math.max(savings.bankedSurplusUnits, 0.01)).toFixed(2)}/unit (APPC)
+              </Text>
+            ) : null}
+            {savings.cliff.keptUnderCliff && savings.cliff.distanceToCliff >= 0 ? (
+              <Text style={[styles.bankedText, { color: colors.successText }]}>
+                Solar kept this month under the 250-unit cliff — {savings.cliff.distanceToCliff} unit{savings.cliff.distanceToCliff === 1 ? '' : 's'} to go (crossing it adds ≈₹{savings.cliff.jump.toFixed(0)}).
+              </Text>
+            ) : null}
           </Card>
         ) : null}
 
@@ -294,6 +308,16 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSize.xs,
     letterSpacing: 0.6,
     textTransform: 'uppercase',
+  },
+  savingsEstimate: {
+    fontFamily: Typography.fontFamily.regular,
+    fontSize: Typography.fontSize.xs,
+  },
+  bankedText: {
+    fontFamily: Typography.fontFamily.regular,
+    fontSize: Typography.fontSize.xs,
+    marginTop: Spacing.md,
+    lineHeight: 15,
   },
   savingsRow: {
     flexDirection: 'row',

@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppSettings } from '../types/telemetry';
+import { DEFAULT_KSEB_TARIFF } from '../services/tariff/ksebTariff';
 
 const SETTINGS_KEY = 'solarguard_settings';
 
@@ -24,6 +25,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   foregroundServiceEnabled: false,
   monitoringMode: 'always',
   homeZone: null,
+  tariff: DEFAULT_KSEB_TARIFF,
   tariffImportRate: 7.50,
   tariffExportRate: 5.00,
 };

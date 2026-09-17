@@ -9,6 +9,7 @@ import OutageAlarm from '../../modules/outage-alarm';
 const FENCE_STATE_KEY = 'sg_geo_state';
 const FENCE_LAST_EVENT_KEY = 'sg_geo_last_event';
 const FENCE_BOOT_MARKER_KEY = 'sg_geo_boot_marker';
+const FENCE_LAST_TRANSITION_LATENCY_KEY = 'sg_geo_last_transition_latency';
 
 export interface GeofenceState {
   /** true = inside home zone, false = outside, null = never seen a transition */
@@ -137,6 +138,31 @@ export const GeofenceStore = {
       );
     } catch {
       // Non-fatal
+    }
+  },
+
+  /**
+   * Record the measured ENTER-transition latency (task entry -> monitoring
+   * FGS started), in ms. Written by the geofence task; surfaced in the
+   * Developer Options diagnostics panel.
+   */
+  async recordTransitionLatency(kind: 'ENTER' | 'EXIT', latencyMs: number): Promise<void> {
+    try {
+      await AsyncStorage.setItem(
+        FENCE_LAST_TRANSITION_LATENCY_KEY,
+        JSON.stringify({ kind, latencyMs, at: Date.now() })
+      );
+    } catch {
+      // Non-fatal
+    }
+  },
+
+  async getTransitionLatency(): Promise<{ kind: 'ENTER' | 'EXIT'; latencyMs: number; at: number } | null> {
+    try {
+      const raw = await AsyncStorage.getItem(FENCE_LAST_TRANSITION_LATENCY_KEY);
+      return raw ? (JSON.parse(raw) as { kind: 'ENTER' | 'EXIT'; latencyMs: number; at: number }) : null;
+    } catch {
+      return null;
     }
   },
 };

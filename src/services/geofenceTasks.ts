@@ -7,9 +7,10 @@ import { SettingsStore } from '../storage/settingsStore';
 import { GeofenceStore } from '../storage/geofenceStore';
 import { detectAndAlert } from './stateDetector';
 import { ForegroundServiceManager } from './foregroundService';
+import { GEOFENCE_REMOTE_POLL_TASK } from './remotePolling';
+import { isDataSyncBudgetEnforced, DataSyncBudgetStore } from '../storage/dataSyncBudgetStore';
 
 export const GEOFENCE_TASK = 'solarguard_home_geofence';
-export const GEOFENCE_REMOTE_POLL_TASK = 'solarguard_remote_poll';
 
 /**
  * Run one telemetry poll + detection with the fence context applied.
@@ -28,13 +29,32 @@ export async function pollOnce(remote: boolean): Promise<void> {
 
 /**
  * Determine whether a background-fetch run should perform a remote poll.
+ * Admits two cases:
+ *  1. Geofenced mode + device outside (or unknown) zone — the normal
+ *     away-from-home remote monitoring path.
+ *  2. Any dataSync-typed run (always mode, incl. the geofenced-without-zone
+ *     and fence-arm-failure fallbacks) on Android 15+ whose 24h dataSync FGS
+ *     budget is spent — detection continues at remote cadence
+ *     (notification-only alarms) until the window rolls and the user
+ *     re-opens the app.
  * Exported for diagnostics and testing.
  */
 export async function shouldRemotePoll(): Promise<boolean> {
   const settings = await SettingsStore.loadSettings();
-  if (settings.monitoringMode !== 'geofenced' || !settings.homeZone) return false;
-  const state = await GeofenceStore.getState();
-  return state.inside !== true; // poll when outside or unknown
+
+  if (settings.monitoringMode === 'geofenced') {
+    if (!settings.homeZone) return false;
+    const state = await GeofenceStore.getState();
+    return state.inside !== true; // poll when outside or unknown
+  }
+
+  // 'always' mode (and its dataSync-typed fallback shapes): only when the OS
+  // budget applies AND we've flagged degradation. The exhausted flag is set
+  // by the FGS loop right before it stops itself — see the dataSync guard in
+  // foregroundService.
+  if (!isDataSyncBudgetEnforced()) return false;
+  const budget = await DataSyncBudgetStore.getState();
+  return budget.exhausted === true;
 }
 
 /**
@@ -42,11 +62,14 @@ export async function shouldRemotePoll(): Promise<boolean> {
  *  - the real headless geofence task (Play Services fence events), and
  *  - the Developer Options geofence simulator (same code path, so tests
  *    exercise exactly what production runs).
+ * Records transition latency: task entry -> monitoring FGS started.
  */
 export async function handleGeofenceTransition(isEnter: boolean): Promise<void> {
+  const transitionStart = Date.now();
+
   if (isEnter) {
-    await GeofenceStore.setState({ inside: true, lastTransitionAt: Date.now() });
-    await GeofenceStore.recordEvent({ kind: 'ENTER', at: Date.now() });
+    await GeofenceStore.setState({ inside: true, lastTransitionAt: transitionStart });
+    await GeofenceStore.recordEvent({ kind: 'ENTER', at: transitionStart });
     await GeofenceStore.stampBootMarker();
 
     // Waking into the zone: start the monitoring FGS (siren-capable).
@@ -54,13 +77,15 @@ export async function handleGeofenceTransition(isEnter: boolean): Promise<void> 
     // in-app run or the user opening the app recovers it.
     try {
       await ForegroundServiceManager.startService('geofence-enter');
-      console.log('[GeofenceTask] ENTER -> monitoring service started.');
+      const latency = Date.now() - transitionStart;
+      await GeofenceStore.recordTransitionLatency('ENTER', latency);
+      console.log(`[GeofenceTask] ENTER -> monitoring service started (${latency}ms).`);
     } catch (err) {
       console.warn('[GeofenceTask] ENTER -> FGS start failed:', err);
     }
   } else {
-    await GeofenceStore.setState({ inside: false, lastTransitionAt: Date.now() });
-    await GeofenceStore.recordEvent({ kind: 'EXIT', at: Date.now() });
+    await GeofenceStore.setState({ inside: false, lastTransitionAt: transitionStart });
+    await GeofenceStore.recordEvent({ kind: 'EXIT', at: transitionStart });
     await GeofenceStore.stampBootMarker();
 
     // Leaving the zone: run a final poll with remote flag so the transition
@@ -73,7 +98,9 @@ export async function handleGeofenceTransition(isEnter: boolean): Promise<void> 
 
     try {
       await ForegroundServiceManager.stopService();
-      console.log('[GeofenceTask] EXIT -> monitoring service stopped.');
+      const latency = Date.now() - transitionStart;
+      await GeofenceStore.recordTransitionLatency('EXIT', latency);
+      console.log(`[GeofenceTask] EXIT -> monitoring service stopped (${latency}ms).`);
     } catch (err) {
       console.warn('[GeofenceTask] EXIT -> FGS stop failed:', err);
     }

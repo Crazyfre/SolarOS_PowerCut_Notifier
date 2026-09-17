@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView, ToastAndroid, Platform, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme, Typography, Spacing, PAGE_GUTTER } from '../theme';
@@ -16,41 +16,38 @@ type NavigationProp = StackNavigationProp<RootStackParamList, 'About'>;
 export function AboutScreen() {
   const navigation = useNavigation<NavigationProp>();
   const { colors } = useTheme();
-  const [tapCount, setTapCount] = useState(0);
-  const [lastTapTime, setLastTapTime] = useState(0);
+  // Refs, not state: every tap reads the true current count immediately —
+  // no stale-closure race across rapid taps (setState in the old async
+  // handler re-read the same tapCount and stalled the unlock).
+  const tapCountRef = useRef(0);
+  const lastTapTimeRef = useRef(0);
 
   const handleVersionTap = async () => {
     const now = Date.now();
-    const isUnlocked = await AsyncStorage.getItem('sg_dev_options_unlocked') === 'true';
 
-    if (isUnlocked) {
-      const msg = 'Developer options are already enabled.';
+    // Reset the streak if the previous tap was > 3s ago
+    if (now - lastTapTimeRef.current > 3000) {
+      tapCountRef.current = 0;
+    }
+    lastTapTimeRef.current = now;
+    tapCountRef.current += 1;
+    const newCount = tapCountRef.current;
+
+    if (newCount >= 7) {
+      tapCountRef.current = 0;
+      const wasUnlocked = (await AsyncStorage.getItem('sg_dev_options_unlocked')) === 'true';
+      const willUnlock = !wasUnlocked;
+      await AsyncStorage.setItem('sg_dev_options_unlocked', willUnlock ? 'true' : 'false');
+      const msg = willUnlock ? 'You are now a developer!' : 'Developer mode disabled.';
       if (Platform.OS === 'android') {
-        ToastAndroid.show(msg, ToastAndroid.SHORT);
+        ToastAndroid.show(msg, ToastAndroid.LONG);
       } else {
-        Alert.alert('Developer Mode', msg);
+        Alert.alert(willUnlock ? 'Success' : 'Developer Mode', msg);
       }
       return;
     }
 
-    // Reset tap count if inactive for > 3 seconds
-    let newCount = tapCount + 1;
-    if (now - lastTapTime > 3000) {
-      newCount = 1;
-    }
-
-    setTapCount(newCount);
-    setLastTapTime(now);
-
-    if (newCount >= 7) {
-      await AsyncStorage.setItem('sg_dev_options_unlocked', 'true');
-      if (Platform.OS === 'android') {
-        ToastAndroid.show('You are now a developer!', ToastAndroid.LONG);
-      } else {
-        Alert.alert('Success', 'You are now a developer!');
-      }
-      setTapCount(0);
-    } else if (newCount >= 3) {
+    if (newCount >= 3) {
       const steps = 7 - newCount;
       const msg = `You are now ${steps} step${steps > 1 ? 's' : ''} away from being a developer.`;
       if (Platform.OS === 'android') {

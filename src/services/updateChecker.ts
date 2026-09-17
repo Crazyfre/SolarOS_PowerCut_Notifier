@@ -3,6 +3,15 @@ import packageJson from '../../package.json';
 
 const CURRENT_VERSION = packageJson.version;
 const GITHUB_RELEASE_API = 'https://api.github.com/repos/Crazyfre/SolarOS_PowerCut_Notifier/releases/latest';
+const TRUSTED_RELEASE_PREFIX = 'https://github.com/Crazyfre/SolarOS_PowerCut_Notifier/releases';
+const CANONICAL_RELEASE_URL = 'https://github.com/Crazyfre/SolarOS_PowerCut_Notifier/releases/latest';
+
+function sanitizeReleaseUrl(url: unknown): string {
+  if (typeof url === 'string' && url.startsWith(TRUSTED_RELEASE_PREFIX)) {
+    return url;
+  }
+  return CANONICAL_RELEASE_URL;
+}
 
 export interface UpdateInfo {
   updateAvailable: boolean;
@@ -26,12 +35,12 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
         updateAvailable: false,
         currentVersion: CURRENT_VERSION,
         latestVersion: CURRENT_VERSION,
-        releaseUrl: '',
+        releaseUrl: CANONICAL_RELEASE_URL,
       };
     }
 
     const latestVersion = latestTag.replace(/^v/, '');
-    const releaseUrl = response.data.html_url || 'https://github.com/Crazyfre/SolarOS_PowerCut_Notifier/releases/latest';
+    const releaseUrl = sanitizeReleaseUrl(response.data.html_url);
 
     // Simple semver comparison helper (x.y.z)
     const compareVersions = (v1: string, v2: string): number => {

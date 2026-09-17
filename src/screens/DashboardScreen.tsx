@@ -260,15 +260,15 @@ export function DashboardScreen() {
 
   const banner = resolveBanner();
 
-  // Battery state helpers for the stats grid
+  // Battery state helper for the compact stats row (matches 14px icons)
   const batteryIcon = (() => {
     const soc = telemetry?.batterySoc ?? 100;
     const c = batteryIsCharging ? colors.charge : telemetry?.batteryStatus === 'DISCHARGE' ? colors.discharge : colors.textSecondary;
-    if (batteryIsCharging) return <BatteryCharging size={18} color={c} strokeWidth={2} />;
-    if (soc > 80) return <BatteryFull size={18} color={c} strokeWidth={2} />;
-    if (soc > 30) return <BatteryMedium size={18} color={c} strokeWidth={2} />;
-    if (soc > 10) return <BatteryLow size={18} color={c} strokeWidth={2} />;
-    return <BatteryWarning size={18} color={c} strokeWidth={2} />;
+    if (batteryIsCharging) return <BatteryCharging size={14} color={c} strokeWidth={2} />;
+    if (soc > 80) return <BatteryFull size={14} color={c} strokeWidth={2} />;
+    if (soc > 30) return <BatteryMedium size={14} color={c} strokeWidth={2} />;
+    if (soc > 10) return <BatteryLow size={14} color={c} strokeWidth={2} />;
+    return <BatteryWarning size={14} color={c} strokeWidth={2} />;
   })();
 
   const rawRows: [string, string][] = telemetry
@@ -400,68 +400,53 @@ export function DashboardScreen() {
               <Gauge value={telemetry.batterySoc ?? 0} />
             </Card>
 
-            {/* Stats grid 2×2 */}
+            {/* Stats — 4 across, one row */}
             <SectionHeader title="Telemetry" />
-            <View style={styles.statsGrid}>
-              <View style={styles.statsRow}>
-                <StatusCard
-                  title="Grid"
-                  value={isGridOn ? 'Connected' : 'OFFLINE'}
-                  subtitle={
-                    !isGridOn
-                      ? 'Power cut active'
-                      : `Today ↓${(telemetry.buyValue ?? 0).toFixed(1)} ↑${(telemetry.gridValue ?? 0).toFixed(1)} kWh`
-                  }
-                  tone={isGridOn ? 'success' : 'danger'}
-                  live={isGridOn}
-                  large
-                  testID="card-grid"
-                />
-              </View>
-              <View style={styles.statsRow}>
-                <StatusCard
-                  title="House Load"
-                  value={formatPower(telemetry.usePower ?? 0)}
-                  subtitle={`Today: ${(telemetry.useValue ?? 0).toFixed(1)} kWh`}
-                  numeric
-                  icon={<House size={16} color={colors.textSecondary} strokeWidth={2} />}
-                  testID="card-load"
-                />
-              </View>
-              <View style={styles.statsRow}>
-                <StatusCard
-                  title="Battery"
-                  value={
-                    telemetry.batteryStatus === 'CHARGE'
-                      ? 'Charging'
-                      : telemetry.batteryStatus === 'DISCHARGE'
-                        ? 'Discharging'
-                        : 'Idle'
-                  }
-                  subtitle={
-                    telemetry.batteryStatus === 'CHARGE'
-                      ? `+${formatPower(Math.abs(telemetry.batteryPower ?? 0))} · Today: ${(telemetry.chargeValue ?? 0).toFixed(1)} kWh`
-                      : telemetry.batteryStatus === 'DISCHARGE'
-                        ? `−${formatPower(Math.abs(telemetry.batteryPower ?? 0))} · Today: ${(telemetry.dischargeValue ?? 0).toFixed(1)} kWh`
-                        : `0 W · Today: ${(telemetry.chargeValue ?? 0).toFixed(1)} kWh`
-                  }
-                  tone={batteryIsCharging ? 'info' : telemetry.batteryStatus === 'DISCHARGE' ? 'discharge' : 'neutral'}
-                  icon={batteryIcon}
-                  testID="card-battery"
-                />
-              </View>
-              <View style={styles.statsRow}>
-                <StatusCard
-                  title="Solar PV"
-                  value={formatPower(telemetry.pvPower ?? 0)}
-                  subtitle={`Today: ${(telemetry.generationValue ?? 0).toFixed(1)} kWh`}
-                  tone="brand"
-                  live={(telemetry.pvPower ?? 0) > 0}
-                  numeric
-                  icon={<SunMedium size={16} color={(telemetry.pvPower ?? 0) > 0 ? colors.brand : colors.textDisabled} strokeWidth={2} />}
-                  testID="card-solar"
-                />
-              </View>
+            <View style={styles.statsRow4}>
+              <StatusCard
+                compact
+                title="Grid"
+                value={isGridOn ? 'On' : 'Off'}
+                subtitle={isGridOn ? 'Connected' : 'Power cut'}
+                tone={isGridOn ? 'success' : 'danger'}
+                live={isGridOn}
+                testID="card-grid"
+              />
+              <StatusCard
+                compact
+                title="Load"
+                value={formatPower(telemetry.usePower ?? 0)}
+                subtitle={`${(telemetry.useValue ?? 0).toFixed(1)} kWh`}
+                numeric
+                icon={<House size={14} color={colors.textSecondary} strokeWidth={2} />}
+                testID="card-load"
+              />
+              <StatusCard
+                compact
+                title="Battery"
+                value={`${Math.round(telemetry.batterySoc ?? 0)}%`}
+                subtitle={
+                  telemetry.batteryStatus === 'CHARGE'
+                    ? 'Charging'
+                    : telemetry.batteryStatus === 'DISCHARGE'
+                      ? 'Discharging'
+                      : 'Idle'
+                }
+                tone={batteryIsCharging ? 'info' : telemetry.batteryStatus === 'DISCHARGE' ? 'discharge' : 'neutral'}
+                icon={batteryIcon}
+                testID="card-battery"
+              />
+              <StatusCard
+                compact
+                title="Solar"
+                value={formatPower(telemetry.pvPower ?? 0)}
+                subtitle={`${(telemetry.generationValue ?? 0).toFixed(1)} kWh`}
+                tone="brand"
+                live={(telemetry.pvPower ?? 0) > 0}
+                numeric
+                icon={<SunMedium size={14} color={(telemetry.pvPower ?? 0) > 0 ? colors.brand : colors.textDisabled} strokeWidth={2} />}
+                testID="card-solar"
+              />
             </View>
 
             {/* System health strip */}
@@ -665,11 +650,9 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSize.base,
     fontVariant: ['tabular-nums'],
   },
-  statsGrid: {
-    gap: Spacing.sm,
-  },
-  statsRow: {
+  statsRow4: {
     flexDirection: 'row',
+    gap: Spacing.sm,
   },
   healthRow: {
     flexDirection: 'row',

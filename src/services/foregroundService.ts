@@ -2,9 +2,13 @@ import notifee, { AndroidImportance, AndroidForegroundServiceType } from '@notif
 import { fetchTelemetry } from '../api/solar';
 import { Store } from '../storage/secureStore';
 import { SettingsStore } from '../storage/settingsStore';
+import type { AppSettings } from '../types/telemetry';
 import { detectAndAlert } from './stateDetector';
 import { GeofenceStore } from '../storage/geofenceStore';
 import { verifyInsideZone } from './geofenceService';
+import { DataSyncBudgetStore, isDataSyncBudgetEnforced } from '../storage/dataSyncBudgetStore';
+import { pollOnce } from './geofenceTasks';
+import { armRemotePolling } from './remotePolling';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const MONITORING_CHANNEL_ID = 'solarguard_monitoring_channel';
@@ -17,6 +21,10 @@ let sleepResolver: (() => void) | null = null;
 
 // Anti-flap hysteresis counter for missed-EXIT detection (see loop guard).
 let consecutiveOutsideSamples = 0;
+
+// dataSync budget bookkeeping for the current FGS session (always mode,
+// Android 15+). sessionStartMs is null when not tracking.
+let sessionStartMs: number | null = null;
 
 /**
  * Cancelable sleep using standard setTimeout.
@@ -66,6 +74,20 @@ async function updateDiagnostic(key: string, value: string): Promise<void> {
  * service runs (Notifee re-invokes startForeground when the type changes).
  * Geofenced mode -> 'location' (no OS time cap); otherwise 'dataSync'.
  */
+/**
+ * Resolve the FGS runtime type and the OS-budget policy for a settings snapshot.
+ * Single source of truth shared by every call site (start, poll, error paths):
+ *   - 'location' FGS (no OS time cap) when the geofenced config is active;
+ *   - 'dataSync' FGS otherwise (Android 15+ ~6h/24h cap → budget ledger).
+ * The type must be identical on EVERY displayNotification call while the
+ * service runs (Notifee re-invokes startForeground when the type changes),
+ * so it is resolved from settings, not from per-cycle remote flags.
+ */
+function resolveFgsRuntime(settings: AppSettings): { geofenced: boolean; budgetApplies: boolean } {
+  const geofenced = settings.monitoringMode === 'geofenced' && !!settings.homeZone;
+  return { geofenced, budgetApplies: !geofenced && isDataSyncBudgetEnforced() };
+}
+
 function buildFgsNotificationConfig(geofenced: boolean): Parameters<typeof notifee.displayNotification>[0]['android'] {
   const config: Parameters<typeof notifee.displayNotification>[0]['android'] = {
     channelId: MONITORING_CHANNEL_ID,
@@ -151,6 +173,33 @@ notifee.registerForegroundService(() => {
             consecutiveOutsideSamples = 0;
           }
 
+          // ── dataSync budget guard (dataSync-typed runs, Android 15+) ────
+          // Android 15 enforces ~6h/24h for dataSync FGS. Notifee's AAR
+          // predates onTimeout, so we self-enforce with a margin: when the
+          // 24h budget is spent, run this cycle remote (notification-only
+          // alarms) and stop the service instead of letting the OS kill it.
+          // Remote background-fetch (~15 min) keeps detection alive; the
+          // budget window rolls and the next app-open re-arms the FGS.
+          // Applies to every dataSync-typed run: always mode proper AND the
+          // geofenced-without-zone / fence-arm-failure fallbacks.
+          const { geofenced: isLocationTyped, budgetApplies } = resolveFgsRuntime(settings);
+          let degradedForBudget = false;
+          if (!remote && budgetApplies) {
+            if (sessionStartMs === null) {
+              sessionStartMs = Date.now();
+            }
+            await DataSyncBudgetStore.recordRuntime(sessionStartMs, Date.now());
+            sessionStartMs = Date.now(); // segment recorded; start fresh segment
+
+            if (await DataSyncBudgetStore.isExhausted()) {
+              degradedForBudget = true;
+              remote = true;
+              console.warn('[ForegroundService] dataSync 24h budget exhausted — degrading to remote polling.');
+              await updateDiagnostic('sg_fs_state', 'Budget Exhausted / Stopping');
+              await updateDiagnostic('sg_fs_last_result', 'dataSync Budget Exhausted');
+            }
+          }
+
           await updateDiagnostic('sg_fs_state', remote ? 'Polling (Remote)' : 'Polling');
 
           console.log('[ForegroundService] Poll Started.');
@@ -197,12 +246,15 @@ notifee.registerForegroundService(() => {
             ? `Remote · ${gridStatusText} · ${batteryText}`
             : `${gridStatusText} · ${solarText} · ${batteryText}`;
 
-          // Update the persistent notification with the fresh stats
+          // Update the persistent notification with the fresh stats. The FGS
+          // type is resolved from settings so it stays identical across every
+          // displayNotification call while this service runs (remote cycles
+          // included) — Notifee re-invokes startForeground if the type flips.
           await notifee.displayNotification({
             id: NOTIFICATION_ID,
             title: 'SolarGuard Monitoring',
             body,
-            android: buildFgsNotificationConfig(!remote && settings.monitoringMode === 'geofenced'),
+            android: buildFgsNotificationConfig(isLocationTyped),
           });
 
           // Sleep until the next poll cycle
@@ -213,11 +265,23 @@ notifee.registerForegroundService(() => {
           await updateDiagnostic('sg_fs_last_poll', String(now));
           await updateDiagnostic('sg_fs_next_poll', String(now + delayMs));
 
-          // Defensive exit: geofenced mode + confirmed outside -> stop the FGS
-          // now; native geofencing owns wake-up and background-fetch owns
-          // remote polling from here on.
+          // Defensive exits — stop the FGS now instead of burning battery or
+          // risking an OS dataSync-timeout crash:
+          //  a) geofenced mode + confirmed outside: native geofencing owns
+          //     wake-up; background-fetch (armed by the mode router) owns
+          //     remote polling from here.
+          //  b) always mode + 24h dataSync budget exhausted: degrade to the
+          //     background-fetch cadence until the window rolls. Arm it here
+          //     because always mode normally never registers that task.
           if (remote) {
             console.log('[ForegroundService] Remote cycle complete. Stopping service.');
+            if (degradedForBudget) {
+              // Remote polling must take over detection for the rest of the
+              // 24h window. shouldRemotePoll() admits always-mode degraded
+              // runs via the budget store's exhausted flag.
+              await DataSyncBudgetStore.markDegraded().catch(() => {});
+              await armRemotePolling().catch(() => {});
+            }
             isServiceRunning = false;
             abortSleep();
             try {
@@ -238,12 +302,13 @@ notifee.registerForegroundService(() => {
             ? 'Monitoring Paused · Login Required' 
             : 'Monitoring Active · Connection Issue';
 
-          // Update persistent notification to show connection issue / paused state
+          // Update persistent notification to show connection issue / paused state.
+          // Same settings-resolved FGS type as the poll path — never per-cycle.
           await notifee.displayNotification({
             id: NOTIFICATION_ID,
             title: 'SolarGuard Monitoring',
             body: errorBody,
-            android: buildFgsNotificationConfig(settings.monitoringMode === 'geofenced'),
+            android: buildFgsNotificationConfig(resolveFgsRuntime(settings).geofenced),
           });
 
           const now = Date.now();
@@ -256,6 +321,13 @@ notifee.registerForegroundService(() => {
       }
 
       console.log('[ForegroundService] Service Stopped.');
+      // Close the dataSync budget segment if the loop ended without
+      // stopService() (remote-cycle defensive exits break out of the loop).
+      if (sessionStartMs !== null) {
+        const end = Date.now();
+        DataSyncBudgetStore.recordRuntime(sessionStartMs, end).catch(() => {});
+        sessionStartMs = null;
+      }
       if (loopPromiseResolver) {
         loopPromiseResolver();
         loopPromiseResolver = null;
@@ -282,7 +354,7 @@ export const ForegroundServiceManager = {
     }
 
     const settings = await SettingsStore.loadSettings();
-    const isGeofenced = settings.monitoringMode === 'geofenced' && !!settings.homeZone;
+    const isGeofenced = resolveFgsRuntime(settings).geofenced;
 
     // Create the notification channel
     await notifee.createChannel({
@@ -312,6 +384,12 @@ export const ForegroundServiceManager = {
     if (!isServiceRunning) return;
     isServiceRunning = false;
     abortSleep();
+    // Close the dataSync budget segment for the session being stopped.
+    if (sessionStartMs !== null) {
+      const end = Date.now();
+      DataSyncBudgetStore.recordRuntime(sessionStartMs, end).catch(() => {});
+      sessionStartMs = null;
+    }
     await notifee.stopForegroundService();
   },
 

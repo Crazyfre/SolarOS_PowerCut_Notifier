@@ -1,7 +1,18 @@
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { TelemetryData, AppSettings } from '../types/telemetry';
+import { FinancialEngine } from './financialEngine';
 import packageJson from '../../package.json';
+
+function escapeHtml(str: unknown): string {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 export const ReportGenerator = {
   /**
@@ -49,13 +60,19 @@ export const ReportGenerator = {
     const gridStatus = telemetry.gridRelayStatus === 'on' ? 'Connected' : 'OFFLINE';
     const wirePower = telemetry.wirePower ?? 0;
 
+    // KSEB slab-aware savings (same engine as the Analytics hero)
+    const tariff = settings.tariff ?? FinancialEngine.DEFAULT_TARIFF;
+    const savings = FinancialEngine.computeSavings(telemetry, tariff);
+    const inr = (n: number) => `₹${n.toFixed(2)}`;
+
     // Build HTML template
     const htmlContent = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8">
-        <title>SolarGuard Monthly Report - ${reportMonth}</title>
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
+        <title>SolarGuard Monthly Report - ${escapeHtml(reportMonth)}</title>
         <style>
           body {
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
@@ -214,7 +231,7 @@ export const ReportGenerator = {
           </div>
           <div class="report-meta">
             <h2>Monthly Energy Report</h2>
-            <p>${reportMonth}</p>
+            <p>${escapeHtml(reportMonth)}</p>
           </div>
         </div>
 
@@ -223,7 +240,7 @@ export const ReportGenerator = {
           <div class="sys-info-grid">
             <div class="info-item">
               <span class="info-label">Plant Name</span>
-              <span class="info-value">${stationName || 'SolarGuard Station'}</span>
+              <span class="info-value">${escapeHtml(stationName || 'SolarGuard Station')}</span>
             </div>
             <div class="info-item">
               <span class="info-label">Installed Capacity</span>
@@ -231,11 +248,11 @@ export const ReportGenerator = {
             </div>
             <div class="info-item">
               <span class="info-label">System ID</span>
-              <span class="info-value">${telemetry.systemId ?? 'Unknown'}</span>
+              <span class="info-value">${escapeHtml(telemetry.systemId ?? 'Unknown')}</span>
             </div>
             <div class="info-item">
               <span class="info-label">Report Period</span>
-              <span class="info-value">${reportMonth}</span>
+              <span class="info-value">${escapeHtml(reportMonth)}</span>
             </div>
           </div>
         </div>
@@ -253,7 +270,7 @@ export const ReportGenerator = {
             </div>
             <div class="info-item">
               <span class="info-label">Grid Relay State</span>
-              <span class="info-value" style="color: ${telemetry.gridRelayStatus === 'on' ? '#10B981' : '#EF4444'}">${gridStatus}</span>
+              <span class="info-value" style="color: ${telemetry.gridRelayStatus === 'on' ? '#10B981' : '#EF4444'}">${escapeHtml(gridStatus)}</span>
             </div>
             <div class="info-item">
               <span class="info-label">Battery Charge</span>
@@ -261,7 +278,7 @@ export const ReportGenerator = {
             </div>
             <div class="info-item">
               <span class="info-label">Battery Flow</span>
-              <span class="info-value">${batteryPower} W (${batteryStatus})</span>
+              <span class="info-value">${batteryPower} W (${escapeHtml(batteryStatus)})</span>
             </div>
             <div class="info-item">
               <span class="info-label">Grid Flow</span>
@@ -300,6 +317,45 @@ export const ReportGenerator = {
               <div class="stat-card-value">${dischargeMonth.toFixed(1)} kWh</div>
             </div>
           </div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Financial Summary — KSEB Slab Counterfactual</div>
+          <div class="stats-grid">
+            <div class="stat-card" style="border-left: 4px solid #10B981;">
+              <div class="stat-card-title">Savings — This Month</div>
+              <div class="stat-card-value">${inr(savings?.monthly.savings ?? 0)}</div>
+            </div>
+            <div class="stat-card" style="border-left: 4px solid #F59E0B;">
+              <div class="stat-card-title">Savings — Today (est.)</div>
+              <div class="stat-card-value">${inr(savings?.today.savings ?? 0)}</div>
+            </div>
+            <div class="stat-card" style="border-left: 4px solid #64748B;">
+              <div class="stat-card-title">Savings — Lifetime (indicative)</div>
+              <div class="stat-card-value">${inr(savings?.lifetime.savings ?? 0)}</div>
+            </div>
+          </div>
+          ${savings ? `
+          <div class="sys-info-grid" style="grid-template-columns: repeat(2, 1fr); margin-top: 12px;">
+            <div class="info-item">
+              <span class="info-label">Billable Units (Import − Export)</span>
+              <span class="info-value">${Math.max(0, importMonth - exportMonth).toFixed(1)} kWh</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Slab Regime</span>
+              <span class="info-value">${savings.regime === 'telescopic' ? 'Telescopic' : 'Non-telescopic'}</span>
+            </div>
+            ${savings.bankedSurplusUnits > 0 ? `
+            <div class="info-item">
+              <span class="info-label">Banked Surplus (settles 31 Mar @ APPC)</span>
+              <span class="info-value">${savings.bankedSurplusUnits.toFixed(1)} units ≈ ${inr(savings.bankedSurplusValue)}</span>
+            </div>` : ''}
+            ${savings.cliff.keptUnderCliff ? `
+            <div class="info-item">
+              <span class="info-label">250-Unit Cliff</span>
+              <span class="info-value" style="color: #10B981;">Kept under by solar — ${savings.cliff.distanceToCliff.toFixed(1)} units to spare</span>
+            </div>` : ''}
+          </div>` : ''}
         </div>
 
         <div class="section">
@@ -347,7 +403,7 @@ export const ReportGenerator = {
           </div>
           <div class="report-meta">
             <h2>Daily Operations</h2>
-            <p>${reportMonth}</p>
+            <p>${escapeHtml(reportMonth)}</p>
           </div>
         </div>
 

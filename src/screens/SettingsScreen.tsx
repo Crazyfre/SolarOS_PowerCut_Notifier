@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -55,6 +55,7 @@ import {
   ChevronRight,
   MapPin,
   Crosshair,
+  TriangleAlert,
 } from 'lucide-react-native';
 import {
   DEFAULT_ZONE_RADIUS_METERS,
@@ -72,8 +73,11 @@ import {
   disarmRemotePolling,
 } from '../services/geofenceService';
 import { handleGeofenceTransition } from '../services/geofenceTasks';
+import { DataSyncBudgetStore, isDataSyncBudgetEnforced, SELF_LIMIT_HOURS } from '../storage/dataSyncBudgetStore';
+import { SettingsStore } from '../storage/settingsStore';
 import { GeofenceStore } from '../storage/geofenceStore';
-import type { MonitoringMode, HomeZone } from '../types/telemetry';
+import { DEFAULT_KSEB_TARIFF } from '../services/tariff/ksebTariff';
+import type { MonitoringMode, HomeZone, TariffSlab } from '../types/telemetry';
 
 type RootStackParamList = {
   Dashboard: undefined;
@@ -124,8 +128,15 @@ export function SettingsScreen() {
   const [batteryCapacity, setBatteryCapacity] = useState(String(settings.batteryCapacity ?? 5.12));
   const [refreshInterval, setRefreshInterval] = useState(settings.refreshIntervalMinutes ?? 5);
   const [amoledTheme, setAmoledTheme] = useState(settings.amoledTheme ?? false);
-  const [tariffImportRate, setTariffImportRate] = useState(String(settings.tariffImportRate ?? 7.50));
-  const [tariffExportRate, setTariffExportRate] = useState(String(settings.tariffExportRate ?? 5.00));
+  // Tariff V4 — KSEB slab editor (rates live in settings.tariff so KSERC
+  // April revisions are correctable without an app update)
+  const [tariffDuty, setTariffDuty] = useState(String(settings.tariff?.electricityDutyPercent ?? 10));
+  const [tariffAppc, setTariffAppc] = useState(String(settings.tariff?.appcRate ?? 3.15));
+  const [tariffTelescopic, setTariffTelescopic] = useState<TariffSlab[]>(
+    settings.tariff?.telescopicSlabs
+      ? settings.tariff.telescopicSlabs.map((s) => ({ ...s }))
+      : DEFAULT_KSEB_TARIFF.telescopicSlabs.map((s) => ({ ...s }))
+  );
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(settings.quietHoursEnabled ?? false);
   const [quietHoursStart, setQuietHoursStart] = useState(settings.quietHoursStart ?? '23:00');
   const [quietHoursEnd, setQuietHoursEnd] = useState(settings.quietHoursEnd ?? '07:00');
@@ -149,6 +160,9 @@ export function SettingsScreen() {
   const [fsLastResult, setFsLastResult] = useState('Unknown');
   const [fsLastPoll, setFsLastPoll] = useState('');
   const [fsNextPoll, setFsNextPoll] = useState('');
+  const [diagMode, setDiagMode] = useState('—');
+  const [diagBudget, setDiagBudget] = useState('—');
+  const [diagFenceLatency, setDiagFenceLatency] = useState('—');
 
   useEffect(() => {
     if (isFocused) {
@@ -175,6 +189,40 @@ export function SettingsScreen() {
             setFsNextPoll(new Date(parseInt(nextPoll, 10)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
           } else {
             setFsNextPoll('Never');
+          }
+
+          // M3 diagnostics: monitoring mode, dataSync budget, fence latency
+          try {
+            const stored = await SettingsStore.loadSettings();
+            const geofencedTyped =
+              stored.monitoringMode === 'geofenced' && !!stored.homeZone;
+            const modeText = geofencedTyped
+              ? 'Geofenced (location FGS)'
+              : 'Always (dataSync FGS)';
+            setDiagMode(modeText);
+
+            if (!geofencedTyped && isDataSyncBudgetEnforced()) {
+              const used = await DataSyncBudgetStore.getUsedHours();
+              const budgetState = await DataSyncBudgetStore.getState();
+              const limit = SELF_LIMIT_HOURS;
+              setDiagBudget(
+                budgetState.exhausted
+                  ? `Exhausted — remote polling (${used.toFixed(1)}h/${limit}h)`
+                  : `${used.toFixed(1)}h / ${limit}h used`
+              );
+            } else {
+              setDiagBudget(geofencedTyped ? 'N/A (location type)' : 'Not enforced (API < 35)');
+            }
+
+            const latency = await GeofenceStore.getTransitionLatency();
+            if (latency) {
+              const at = new Date(latency.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+              setDiagFenceLatency(`${latency.kind} → ${latency.latencyMs}ms (${at})`);
+            } else {
+              setDiagFenceLatency('No transition yet');
+            }
+          } catch {
+            // Non-fatal
           }
         }
       })();
@@ -292,6 +340,14 @@ export function SettingsScreen() {
 
   // â”€â”€â”€ Save settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+  /** Edit one telescopic slab rate; invalid input keeps the previous value. */
+  const updateTariffSlab = (index: number, text: string) => {
+    const rate = parseFloat(text);
+    setTariffTelescopic((prev) =>
+      prev.map((s, i) => (i === index ? { ...s, rate: isNaN(rate) || rate < 0 ? s.rate : rate } : s))
+    );
+  };
+
   const handleSave = async () => {
     const thresholdNum = parseInt(batteryWarningThreshold, 10);
     if (isNaN(thresholdNum) || thresholdNum < 10 || thresholdNum > 50) {
@@ -305,15 +361,20 @@ export function SettingsScreen() {
       return;
     }
 
-    const importRateNum = parseFloat(tariffImportRate);
-    if (isNaN(importRateNum) || importRateNum < 0) {
-      Alert.alert('Invalid Input', 'Import tariff must be a non-negative number.');
+    // Tariff V4 validation: duty/APPC and slab rates must parse to sane
+    // non-negative numbers; slab bounds stay fixed to the KSERC structure.
+    const dutyNum = parseFloat(tariffDuty);
+    if (isNaN(dutyNum) || dutyNum < 0 || dutyNum > 50) {
+      Alert.alert('Invalid Input', 'Electricity duty must be between 0% and 50%.');
       return;
     }
-
-    const exportRateNum = parseFloat(tariffExportRate);
-    if (isNaN(exportRateNum) || exportRateNum < 0) {
-      Alert.alert('Invalid Input', 'Export tariff must be a non-negative number.');
+    const appcNum = parseFloat(tariffAppc);
+    if (isNaN(appcNum) || appcNum < 0 || appcNum > 20) {
+      Alert.alert('Invalid Input', 'APPC rate must be between ₹0 and ₹20 per unit.');
+      return;
+    }
+    if (tariffTelescopic.some((s) => isNaN(s.rate) || s.rate < 0)) {
+      Alert.alert('Invalid Input', 'All telescopic slab rates must be non-negative numbers.');
       return;
     }
 
@@ -368,8 +429,14 @@ export function SettingsScreen() {
       foregroundServiceEnabled,
       monitoringMode,
       homeZone: zone,
-      tariffImportRate: importRateNum,
-      tariffExportRate: exportRateNum,
+      // Tariff V4: persist the full slab config edited above. Flat-rate
+      // fields are dropped — computeSavings ignores them.
+      tariff: {
+        ...(settings.tariff ?? DEFAULT_KSEB_TARIFF),
+        telescopicSlabs: tariffTelescopic.map((s) => ({ ...s })),
+        electricityDutyPercent: dutyNum,
+        appcRate: appcNum,
+      },
     };
 
     if (activeStationId) {
@@ -415,14 +482,24 @@ export function SettingsScreen() {
 
     await DevOverridesStore.saveOverrides(overrides);
 
-    // Arm/disarm the native geofence to match the saved configuration
+    // Arm/disarm the native geofence to match the saved configuration.
+    // Remote polling stays armed when a dataSync budget degradation is
+    // active: it's the only detection path until the 24h window rolls
+    // (shouldRemotePoll admits those runs via the exhausted flag).
     try {
       if (monitoringMode === 'geofenced' && zone) {
         await registerGeofence(zone);
         await armRemotePolling();
       } else {
         await unregisterGeofence();
-        await disarmRemotePolling();
+        const budgetDegraded =
+          isDataSyncBudgetEnforced() &&
+          (await DataSyncBudgetStore.getState().then((s) => s.exhausted === true));
+        if (budgetDegraded) {
+          await armRemotePolling();
+        } else {
+          await disarmRemotePolling();
+        }
       }
       setGeofenceRegistered(await isGeofenceRegistered());
     } catch (err) {
@@ -475,6 +552,42 @@ export function SettingsScreen() {
       />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        {/* SIMULATION ACTIVE WARNING BANNER */}
+        {devOverridesEnabled ? (
+          <View
+            style={[
+              styles.warningBanner,
+              {
+                backgroundColor: colors.dangerFill,
+                borderColor: colors.dangerBorder,
+                marginBottom: Spacing.lg,
+              },
+            ]}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+              <TriangleAlert size={18} color={colors.dangerText} strokeWidth={2} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.warningBannerTitle, { color: colors.dangerText }]}>
+                  Simulation Mode Active
+                </Text>
+                <Text style={[styles.warningBannerText, { color: colors.textSecondary }]}>
+                  Mock telemetry overrides are active. Live SolarOS data is currently overridden.
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.warningBannerBtn, { borderColor: colors.dangerBorder }]}
+              onPress={async () => {
+                setDevOverridesEnabled(false);
+                await DevOverridesStore.saveOverrides({ enabled: false });
+                refreshTelemetry().catch(() => {});
+              }}
+            >
+              <Text style={[styles.warningBannerBtnText, { color: colors.dangerText }]}>Disable</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {/* ALARM SYSTEM CONFIG */}
         <View style={styles.section}>
           <SectionHeader title="Alarm & Sound" icon={<BellRing size={14} color={colors.textSecondary} strokeWidth={2} />} />
@@ -820,29 +933,58 @@ export function SettingsScreen() {
               />
             </SettingRow>
             <RowDivider />
-            <SettingRow title="Import Tariff" subtitle="Electricity cost from grid">
-              <Input
-                value={tariffImportRate}
-                onChangeText={setTariffImportRate}
-                keyboardType="numeric"
-                placeholder="7.50"
-                unit="â‚¹/kWh"
-                compactWidth={110}
-                accessibilityLabel="Import tariff per kilowatt hour"
-              />
-            </SettingRow>
+            <SettingRow
+              title="KSEB Tariff Slabs"
+              subtitle="Telescopic block rates (≤250 units/mo) — auto-fixed to your bill"
+            />
+            <View style={styles.slabList}>
+              {tariffTelescopic.map((slab, i) => (
+                <View key={i} style={styles.slabRow}>
+                  <Text style={[styles.slabLabel, { color: colors.textSecondary }]}>
+                    {i === 0 ? '1' : `${tariffTelescopic[i - 1].upTo + 1}`}–{slab.upTo}
+                  </Text>
+                  <Input
+                    value={String(slab.rate)}
+                    onChangeText={(text) => updateTariffSlab(i, text)}
+                    keyboardType="numeric"
+                    unit="₹/unit"
+                    compactWidth={110}
+                    accessibilityLabel={`Telescopic slab ${i + 1} rate in rupees per unit`}
+                  />
+                </View>
+              ))}
+              <Text style={[styles.slabHint, { color: colors.textDisabled }]}>
+                Above 250 units the whole month bills at the non-telescopic band rate (6.75–9.20 by consumption).
+              </Text>
+            </View>
             <RowDivider />
-            <SettingRow title="Export Tariff" subtitle="Feed-in credit to grid">
-              <Input
-                value={tariffExportRate}
-                onChangeText={setTariffExportRate}
-                keyboardType="numeric"
-                placeholder="5.00"
-                unit="â‚¹/kWh"
-                compactWidth={110}
-                accessibilityLabel="Export tariff per kilowatt hour"
-              />
-            </SettingRow>
+            <View style={styles.slabList}>
+              <View style={styles.slabRow}>
+                <Text style={[styles.slabLabel, { color: colors.textSecondary }]}>Electricity Duty</Text>
+                <Input
+                  value={tariffDuty}
+                  onChangeText={setTariffDuty}
+                  keyboardType="numeric"
+                  unit="%"
+                  compactWidth={90}
+                  accessibilityLabel="Electricity duty percent"
+                />
+              </View>
+              <View style={styles.slabRow}>
+                <Text style={[styles.slabLabel, { color: colors.textSecondary }]}>APPC Rate (banked units)</Text>
+                <Input
+                  value={tariffAppc}
+                  onChangeText={setTariffAppc}
+                  keyboardType="numeric"
+                  unit="₹/unit"
+                  compactWidth={110}
+                  accessibilityLabel="Average pooled power cost rate for banked surplus"
+                />
+              </View>
+              <Text style={[styles.slabHint, { color: colors.textDisabled }]}>
+                Rates follow the KSERC 2025–2027 order; edit when KSERC revises (April) or to match your paper bill.
+              </Text>
+            </View>
             <RowDivider />
             <SettingRow title="Refresh Interval" subtitle="Live telemetry polling speed" />
             <SegmentedControl
@@ -921,8 +1063,11 @@ export function SettingsScreen() {
               {(
                 [
                   ['State', fsState, fsState.includes('Error') ? colors.dangerText : colors.textPrimary],
-                  ['Last Result', fsLastResult, fsLastResult === 'Success' ? colors.successText : colors.dangerText],
+                  ['Last Result', fsLastResult, fsLastResult === 'Success' ? colors.successText : fsLastResult.includes('Exhausted') ? colors.warningText ?? colors.dangerText : colors.dangerText],
                   ['Service Type', 'Foreground Service', colors.textPrimary],
+                  ['Monitoring Mode', diagMode, colors.textPrimary],
+                  ['dataSync Budget', diagBudget, diagBudget.startsWith('Exhausted') ? colors.dangerText : colors.textPrimary],
+                  ['Fence Latency', diagFenceLatency, colors.textPrimary],
                   ['Interval', `${refreshInterval} minute${refreshInterval !== 1 ? 's' : ''}`, colors.textPrimary],
                   ['Last Poll', fsLastPoll, colors.textPrimary],
                   ['Next Poll', fsNextPoll, colors.textPrimary],
@@ -1263,6 +1408,26 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
     lineHeight: 15,
   },
+  slabList: {
+    marginTop: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  slabRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  slabLabel: {
+    fontFamily: Typography.fontFamily.monoMedium,
+    fontSize: Typography.fontSize.sm,
+    fontVariant: ['tabular-nums'],
+  },
+  slabHint: {
+    fontFamily: Typography.fontFamily.regular,
+    fontSize: Typography.fontSize.xs,
+    lineHeight: 15,
+    marginTop: 2,
+  },
   diagCard: {},
   diagHeader: {
     flexDirection: 'row',
@@ -1339,5 +1504,34 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xl,
     marginBottom: Spacing.md,
     lineHeight: 15,
+  },
+  warningBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: Spacing.md,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: Spacing.sm,
+  },
+  warningBannerTitle: {
+    fontFamily: Typography.fontFamily.semiBold,
+    fontSize: Typography.fontSize.sm,
+    marginBottom: 2,
+  },
+  warningBannerText: {
+    fontFamily: Typography.fontFamily.regular,
+    fontSize: Typography.fontSize.xs,
+    lineHeight: 15,
+  },
+  warningBannerBtn: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 6,
+  },
+  warningBannerBtnText: {
+    fontFamily: Typography.fontFamily.semiBold,
+    fontSize: Typography.fontSize.xs,
   },
 });

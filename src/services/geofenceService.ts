@@ -1,16 +1,23 @@
 import { Platform } from 'react-native';
 import * as Location from 'expo-location';
-import * as BackgroundFetch from 'expo-background-fetch';
 import { AppSettings, HomeZone } from '../types/telemetry';
 import { GeofenceStore, isInsideZone } from '../storage/geofenceStore';
 import { DevOverridesStore } from '../storage/devOverridesStore';
-import { GEOFENCE_TASK, GEOFENCE_REMOTE_POLL_TASK } from './geofenceTasks';
+import { GEOFENCE_TASK } from './geofenceTasks';
+import {
+  GEOFENCE_REMOTE_POLL_TASK,
+  REMOTE_POLL_MIN_INTERVAL_MINUTES,
+  armRemotePolling,
+  disarmRemotePolling,
+} from './remotePolling';
 
 export const MIN_ZONE_RADIUS_METERS = 100;
 export const DEFAULT_ZONE_RADIUS_METERS = 250;
 export const MAX_ZONE_RADIUS_METERS = 2000;
 
-export const REMOTE_POLL_MIN_INTERVAL_MINUTES = 15;
+// Re-exported for existing imports (SettingsScreen, AppContext).
+export { armRemotePolling, disarmRemotePolling };
+export { REMOTE_POLL_MIN_INTERVAL_MINUTES, GEOFENCE_REMOTE_POLL_TASK };
 
 let fenceRegistrationInFlight: Promise<boolean> | null = null;
 
@@ -130,31 +137,6 @@ export async function isGeofenceRegistered(): Promise<boolean> {
     return await Location.hasStartedGeofencingAsync(GEOFENCE_TASK);
   } catch {
     return false;
-  }
-}
-
-// ─── Remote (outside-fence) periodic polling via background-fetch ────────────
-
-export async function armRemotePolling(): Promise<void> {
-  try {
-    await BackgroundFetch.registerTaskAsync(GEOFENCE_REMOTE_POLL_TASK, {
-      minimumInterval: REMOTE_POLL_MIN_INTERVAL_MINUTES,
-      stopOnTerminate: false,
-      startOnBoot: true,
-    });
-    console.log('[GeofenceService] Remote polling armed (15 min cadence).');
-  } catch (error) {
-    console.warn('[GeofenceService] Failed to arm remote polling:', error);
-  }
-}
-
-export async function disarmRemotePolling(): Promise<void> {
-  try {
-    // unregisterTaskAsync is a no-op for unknown tasks; safe to call blindly.
-    await BackgroundFetch.unregisterTaskAsync(GEOFENCE_REMOTE_POLL_TASK);
-    console.log('[GeofenceService] Remote polling disarmed.');
-  } catch (error) {
-    console.warn('[GeofenceService] Failed to disarm remote polling:', error);
   }
 }
 

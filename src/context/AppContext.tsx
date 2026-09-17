@@ -23,6 +23,7 @@ import {
   unregisterGeofence,
 } from '../services/geofenceService';
 import { GeofenceStore, GeofenceState } from '../storage/geofenceStore';
+import { DataSyncBudgetStore } from '../storage/dataSyncBudgetStore';
 
 // ─── Context types ────────────────────────────────────────────────────────────
 
@@ -218,6 +219,10 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
       }
 
       if (settings.monitoringMode === 'geofenced' && settings.homeZone) {
+        // Geofenced mode runs a location-typed FGS (no time cap) — the
+        // dataSync budget ledger is irrelevant here.
+        await DataSyncBudgetStore.clear().catch(() => {});
+
         // Arm the native fence (idempotent) + remote polling safety net.
         const armed = await registerGeofence(settings.homeZone);
         if (!armed) {
@@ -247,11 +252,29 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
         await unregisterGeofence();
         await disarmRemotePolling();
         if (settings.foregroundServiceEnabled) {
+          // Budget recovery: if the 24h dataSync window rolled over since
+          // degradation, clear the exhausted flag and let the FGS run again.
+          // If still exhausted, keep remote polling armed (notification-only
+          // alarms) and don't restart the FGS — the OS would kill it anyway.
+          if (await DataSyncBudgetStore.getState().then((s) => s.exhausted)) {
+            const budgetRecovered = !(await DataSyncBudgetStore.isExhausted());
+            if (budgetRecovered) {
+              console.log('[AppContext] dataSync budget window rolled — resuming always-mode FGS.');
+              await DataSyncBudgetStore.clear();
+            } else {
+              console.warn('[AppContext] dataSync budget still spent — staying on remote polling.');
+              await armRemotePolling().catch(() => {});
+              await ForegroundServiceManager.stopService().catch(() => {});
+              return;
+            }
+          }
           await ForegroundServiceManager.startService('user').catch((err) => {
             console.warn('[AppContext] Failed to start foreground service:', err);
           });
         } else {
           await ForegroundServiceManager.stopService().catch(() => {});
+          // User disabled the FGS entirely — budget no longer relevant.
+          await DataSyncBudgetStore.clear().catch(() => {});
         }
       }
     };

@@ -3,7 +3,13 @@
 // and Battery below. Node chips are surface2 with hairline borders; status
 // rings carry the state colors (grid green/red, battery blue/rose, solar
 // amber). Flow dots run at constant speed — they represent real energy
-// transfer. Responsive via viewBox scaling.
+// transfer.
+//
+// Geometry note: the canvas (320×300) reserves label margins INSIDE the
+// viewBox — every node has ≥26 units of clearance for its label, so nothing
+// can clip at the card boundary. All overlays (icons, labels, dots) are
+// positioned in scaled canvas space; label offsets scale with the canvas so
+// the layout stays proportional on any screen width.
 
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Easing, useWindowDimensions } from 'react-native';
@@ -32,17 +38,37 @@ interface PowerFlowProps {
   batterySoc?: number;
 }
 
-// Canonical canvas — everything scales from this viewBox
-const CANVAS_W = 300;
-const CANVAS_H = 240;
+// Canonical canvas — everything scales from this viewBox.
+// Vertical budget: solar label zone (0–62) · nodes (49–255) · battery label
+// zone (255–310). Horizontal: labels span 13–307, inside 0–320.
+const CANVAS_W = 320;
+const CANVAS_H = 310;
 
 const nodes = {
-  grid: { x: 50, y: 120 },
-  solar: { x: 150, y: 28 },
-  inverter: { x: 150, y: 120 },
-  battery: { x: 150, y: 212 },
-  house: { x: 250, y: 120 },
+  grid: { x: 58, y: 150 },
+  solar: { x: 160, y: 66 },
+  inverter: { x: 160, y: 150 },
+  battery: { x: 160, y: 236 },
+  house: { x: 262, y: 150 },
 };
+
+// Wire endpoints (canvas units) — shared by SVG lines and flow dots
+const WIRE = {
+  gridX1: nodes.grid.x + 20,       // 78
+  gridX2: nodes.inverter.x - 25,    // 135
+  solarY1: nodes.solar.y + 18,      // 84
+  solarY2: nodes.inverter.y - 25,   // 125
+  houseX1: nodes.inverter.x + 25,   // 185
+  houseX2: nodes.house.x - 20,      // 242
+  battY1: nodes.inverter.y + 25,    // 175
+  battY2: nodes.battery.y - 18,     // 218
+};
+
+// Label placement (canvas units, relative to node center)
+const LABEL_BELOW = 27;  // below node center — clears the r≤21 circle + ring
+const LABEL_ABOVE = 54;  // above node center — clears the r=17 circle + ring
+                          // even with both label lines rendered at min scale
+const LABEL_WIDTH = 90;  // fixed overlay box width (px, centered)
 
 function FlowDot({
   color,
@@ -124,9 +150,11 @@ export function PowerFlowDiagram({
   // animation shows direction, color shows state.
   const loadColor = colors.textSecondary;
 
-  // Scale canvas down on narrow screens so labels stay on-card
-  const availWidth = Math.min(screenWidth - 48, CANVAS_W);
-  const scale = availWidth / CANVAS_W;
+  // Responsive sizing: use the full card width (screen − scroll gutter −
+  // card padding). Allow a slight upscale on wide screens, floor for narrow
+  // ones so labels always keep their reserved canvas margins.
+  const availWidth = Math.max(screenWidth - 80, 240);
+  const scale = Math.max(Math.min(availWidth / CANVAS_W, 1.1), 0.8);
   const scaledW = CANVAS_W * scale;
   const scaledH = CANVAS_H * scale;
 
@@ -160,6 +188,11 @@ export function PowerFlowDiagram({
   const wireStroke = (active: boolean, color: string) =>
     active ? withAlpha(color, 45) : withAlpha(colors.textDisabled, 15);
 
+  // Overlay position helpers — canvas units → scaled px
+  const px = (x: number) => x * scale;
+  const labelTop = (n: { y: number }, below: boolean) =>
+    (below ? n.y + LABEL_BELOW : n.y - LABEL_ABOVE) * scale;
+
   return (
     <View style={styles.container}>
       <View style={[styles.canvas, { width: scaledW, height: scaledH }]}>
@@ -171,29 +204,29 @@ export function PowerFlowDiagram({
         >
           {/* Connector wires (dashed hairlines; solid-ish when active) */}
           <Line
-            x1={nodes.grid.x + 20} y1={nodes.grid.y}
-            x2={nodes.inverter.x - 24} y2={nodes.inverter.y}
+            x1={WIRE.gridX1} y1={nodes.grid.y}
+            x2={WIRE.gridX2} y2={nodes.inverter.y}
             stroke={wireStroke(gridOn, gridColor)}
             strokeWidth={gridOn ? 2.5 : 2}
             strokeDasharray={gridOn ? undefined : '5,4'}
           />
           <Line
-            x1={nodes.solar.x} y1={nodes.solar.y + 18}
-            x2={nodes.inverter.x} y2={nodes.inverter.y - 24}
+            x1={nodes.solar.x} y1={WIRE.solarY1}
+            x2={nodes.inverter.x} y2={WIRE.solarY2}
             stroke={wireStroke(pvPower > 0, solarColor)}
             strokeWidth={pvPower > 0 ? 2.5 : 2}
             strokeDasharray={pvPower > 0 ? undefined : '5,4'}
           />
           <Line
-            x1={nodes.inverter.x + 24} y1={nodes.inverter.y}
-            x2={nodes.house.x - 20} y2={nodes.house.y}
+            x1={WIRE.houseX1} y1={nodes.inverter.y}
+            x2={WIRE.houseX2} y2={nodes.house.y}
             stroke={wireStroke(usePower > 0, loadColor)}
             strokeWidth={usePower > 0 ? 2.5 : 2}
             strokeDasharray={usePower > 0 ? undefined : '5,4'}
           />
           <Line
-            x1={nodes.inverter.x} y1={nodes.inverter.y + 24}
-            x2={nodes.battery.x} y2={nodes.battery.y - 18}
+            x1={nodes.inverter.x} y1={WIRE.battY1}
+            x2={nodes.battery.x} y2={WIRE.battY2}
             stroke={wireStroke(isCharging || isDischarging, batteryColor)}
             strokeWidth={isCharging || isDischarging ? 2.5 : 2}
             strokeDasharray={isCharging || isDischarging ? undefined : '5,4'}
@@ -217,7 +250,7 @@ export function PowerFlowDiagram({
           <Circle cx={nodes.house.x} cy={nodes.house.y} r="19" fill={colors.surface2} stroke={loadColor} strokeWidth="2" />
         </Svg>
 
-        {/* Node icons — position in canvas units via percentage math */}
+        {/* Node icons — centered on the scaled node position */}
         {(
           [
             { node: 'grid', el: gridOn ? <PlugZap size={20} color={gridColor} strokeWidth={2} /> : <PowerOff size={20} color={gridColor} strokeWidth={2} /> },
@@ -233,8 +266,8 @@ export function PowerFlowDiagram({
               style={[
                 styles.center,
                 {
-                  left: (n.x / CANVAS_W) * scaledW,
-                  top: (n.y / CANVAS_H) * scaledH,
+                  left: px(n.x),
+                  top: px(n.y),
                   transform: [{ translateX: -12 }, { translateY: -12 }],
                 },
               ]}
@@ -249,8 +282,8 @@ export function PowerFlowDiagram({
           style={[
             styles.center,
             {
-              left: (nodes.solar.x / CANVAS_W) * scaledW,
-              top: (nodes.solar.y / CANVAS_H) * scaledH,
+              left: px(nodes.solar.x),
+              top: px(nodes.solar.y),
               opacity: solarPulse,
               transform: [{ translateX: -12 }, { translateY: -12 }],
             },
@@ -259,7 +292,7 @@ export function PowerFlowDiagram({
           <SunMedium size={20} color={solarColor} strokeWidth={2} />
         </Animated.View>
 
-        {/* Node labels — percentages keep them glued to the SVG layout */}
+        {/* Node labels — offset in scaled canvas space so they track nodes */}
         {(
           [
             { n: nodes.grid, label: 'Grid', value: gridOn ? (wirePower > 0 ? `+${formatPower(wirePower)}` : wirePower < 0 ? `−${formatPower(Math.abs(wirePower))}` : '0W') : 'OFFLINE', below: true, valueColor: gridColor },
@@ -274,11 +307,10 @@ export function PowerFlowDiagram({
             style={[
               styles.nodeLabel,
               {
-                left: (n.x / CANVAS_W) * scaledW,
-                top: below
-                  ? (n.y / CANVAS_H) * scaledH + 26
-                  : (n.y / CANVAS_H) * scaledH - 44,
-                transform: [{ translateX: -45 }],
+                left: px(n.x),
+                top: labelTop(n, below),
+                width: LABEL_WIDTH,
+                transform: [{ translateX: -LABEL_WIDTH / 2 }],
               },
             ]}
           >
@@ -294,38 +326,38 @@ export function PowerFlowDiagram({
         {/* Flow dots (constant speed = real energy transfer) */}
         {gridOn && wirePower > 0 && (
           <FlowDot color={colors.charge} scale={scale}
-            x1={(nodes.grid.x + 20) * scale} y1={nodes.grid.y * scale}
-            x2={(nodes.inverter.x - 24) * scale} y2={nodes.inverter.y * scale}
+            x1={px(WIRE.gridX1)} y1={px(nodes.grid.y)}
+            x2={px(WIRE.gridX2)} y2={px(nodes.inverter.y)}
             speed={motion.flowSpeed * scale} />
         )}
         {gridOn && wirePower < 0 && (
           <FlowDot color={colors.success} scale={scale}
-            x1={(nodes.inverter.x - 24) * scale} y1={nodes.inverter.y * scale}
-            x2={(nodes.grid.x + 20) * scale} y2={nodes.grid.y * scale}
+            x1={px(WIRE.gridX2)} y1={px(nodes.inverter.y)}
+            x2={px(WIRE.gridX1)} y2={px(nodes.grid.y)}
             speed={motion.flowSpeed * scale} />
         )}
         {pvPower > 0 && (
           <FlowDot color={colors.brand} scale={scale} delay={100}
-            x1={nodes.solar.x * scale} y1={(nodes.solar.y + 18) * scale}
-            x2={nodes.inverter.x * scale} y2={(nodes.inverter.y - 24) * scale}
+            x1={px(nodes.solar.x)} y1={px(WIRE.solarY1)}
+            x2={px(nodes.inverter.x)} y2={px(WIRE.solarY2)}
             speed={motion.flowSpeed * scale} />
         )}
         {usePower > 0 && (
           <FlowDot color={loadColor} scale={scale} delay={300}
-            x1={(nodes.inverter.x + 24) * scale} y1={nodes.inverter.y * scale}
-            x2={(nodes.house.x - 20) * scale} y2={nodes.house.y * scale}
+            x1={px(WIRE.houseX1)} y1={px(nodes.inverter.y)}
+            x2={px(WIRE.houseX2)} y2={px(nodes.house.y)}
             speed={motion.flowSpeed * scale} />
         )}
         {isDischarging && (
           <FlowDot color={colors.discharge} scale={scale} delay={150}
-            x1={nodes.battery.x * scale} y1={(nodes.battery.y - 18) * scale}
-            x2={nodes.inverter.x * scale} y2={(nodes.inverter.y + 24) * scale}
+            x1={px(nodes.battery.x)} y1={px(WIRE.battY2)}
+            x2={px(nodes.inverter.x)} y2={px(WIRE.battY1)}
             speed={motion.flowSpeed * scale} />
         )}
         {isCharging && (
           <FlowDot color={colors.charge} scale={scale} delay={150}
-            x1={nodes.inverter.x * scale} y1={(nodes.inverter.y + 24) * scale}
-            x2={nodes.battery.x * scale} y2={(nodes.battery.y - 18) * scale}
+            x1={px(nodes.inverter.x)} y1={px(WIRE.battY1)}
+            x2={px(nodes.battery.x)} y2={px(WIRE.battY2)}
             speed={motion.flowSpeed * scale} />
         )}
       </View>
@@ -350,7 +382,6 @@ const styles = StyleSheet.create({
   },
   nodeLabel: {
     position: 'absolute',
-    width: 90,
     alignItems: 'center',
   },
   nodeLabelTitle: {

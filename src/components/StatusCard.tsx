@@ -2,6 +2,12 @@
 // Neutral surface; state is communicated by the StatusDot + optional
 // status-colored value text — never by card borders/glows (those are
 // reserved for the banner system).
+//
+// Two layouts:
+// - default: horizontal header (dot/title/icon) + value + subtitle
+// - compact: narrow vertical stack for 4-across telemetry rows — icon and
+//   dot sit on one line, value below, optional micro-subtitle (kept short
+//   by callers — no long strings in compact mode)
 
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
@@ -22,6 +28,8 @@ interface StatusCardProps {
   large?: boolean;
   /** numeric value rendered in mono (power readouts) */
   numeric?: boolean;
+  /** vertical stack layout for narrow multi-column rows */
+  compact?: boolean;
   icon?: React.ReactNode;
   testID?: string;
 }
@@ -46,11 +54,52 @@ export function StatusCard({
   live = false,
   large = false,
   numeric = false,
+  compact = false,
   icon,
   testID,
 }: StatusCardProps) {
   const { colors, shadows } = useTheme();
   const dotColor = toneColorFor(tone, colors);
+
+  if (compact) {
+    return (
+      <View
+        testID={testID}
+        style={[
+          styles.card,
+          styles.cardCompact,
+          { backgroundColor: colors.surface1, borderColor: colors.border },
+          shadows.card as object,
+        ]}
+      >
+        <View style={styles.compactHeader}>
+          {icon ? <View>{icon}</View> : null}
+          {dotColor ? (
+            <StatusDot color={dotColor} mode={live ? 'breathing' : 'steady'} size={6} />
+          ) : null}
+        </View>
+        <Text
+          style={[
+            numeric ? styles.valueNumericCompact : styles.valueTextCompact,
+            dotColor ? { color: dotColor } : { color: colors.textPrimary },
+          ]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.6}
+        >
+          {value}
+        </Text>
+        <Text style={[styles.compactTitle, { color: colors.textSecondary }]} numberOfLines={1}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text style={[styles.compactSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+    );
+  }
 
   return (
     <View
@@ -130,6 +179,42 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSize.xl,
     fontVariant: ['tabular-nums'],
     letterSpacing: -0.3,
+  },
+
+  // Compact layout (narrow vertical stack)
+  cardCompact: {
+    padding: Spacing.sm,
+    alignSelf: 'stretch',
+  },
+  compactHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.xs + 2,
+    minHeight: 18,
+  },
+  compactTitle: {
+    fontFamily: Typography.fontFamily.semiBold,
+    fontSize: Typography.fontSize.xs - 1,
+    letterSpacing: Typography.tracking.label,
+    textTransform: 'uppercase',
+    marginTop: 3,
+  },
+  compactSubtitle: {
+    fontFamily: Typography.fontFamily.regular,
+    fontSize: Typography.fontSize.xs - 2,
+    marginTop: 1,
+  },
+  valueTextCompact: {
+    fontFamily: Typography.fontFamily.semiBold,
+    fontSize: Typography.fontSize.base,
+    letterSpacing: -0.2,
+  },
+  valueNumericCompact: {
+    fontFamily: Typography.fontFamily.monoMedium,
+    fontSize: Typography.fontSize.base,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: -0.2,
   },
   subtitle: {
     fontFamily: Typography.fontFamily.regular,

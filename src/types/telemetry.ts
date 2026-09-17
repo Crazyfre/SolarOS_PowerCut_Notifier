@@ -68,6 +68,34 @@ export interface OutageRecord {
 
 export type GridStatus = 'on' | 'off' | 'unknown';
 
+/** Solar export settlement arrangement (KSERC Renewable Energy Regulations 2025). */
+export type SolarScheme = 'net-metering' | 'net-billing' | 'gross-metering';
+
+/** A slab definition: units up to `upTo` (cumulative monthly bound) billed at `rate`. */
+export interface TariffSlab {
+  upTo: number;   // cumulative monthly unit bound (Infinity for the open top band)
+  rate: number;   // ₹ / kWh
+}
+
+/**
+ * KSEB LT-1A domestic tariff configuration. Every rate lives here —
+ * persisted in settings — so KSERC's April revisions (or a user's paper
+ * bill) can correct the model without an app update.
+ */
+export interface TariffConfig {
+  scheme: SolarScheme;
+  /** Telescopic blocks (≤250 units/mo): cumulative bounds 50/100/150/200/250 */
+  telescopicSlabs: TariffSlab[];
+  /** Non-telescopic bands (>250 units/mo): whole-month band rates */
+  nonTelescopicBands: TariffSlab[];
+  /** Kerala electricity duty, % of energy charge */
+  electricityDutyPercent: number;
+  /** Average Pooled Power Cost (₹/kWh) — annual settlement of banked surplus */
+  appcRate: number;
+  /** Slab thresholds are per-month; multiply for bi-monthly cycles */
+  monthlyCycleFactor: number;
+}
+
 /** Home zone geofence configuration (lat/lng + radius in meters). */
 export interface HomeZone {
   lat: number;
@@ -112,6 +140,9 @@ export interface AppSettings {
   homeZoneFallbackAlways?: boolean;
 
   // Tariffs
+  /** KSEB slab tariff config (V4) — supersedes the flat rates below */
+  tariff?: TariffConfig;
+  /** @deprecated V4 — flat rates replaced by tariff slabs; kept for migration */
   tariffImportRate?: number;
   tariffExportRate?: number;
 }

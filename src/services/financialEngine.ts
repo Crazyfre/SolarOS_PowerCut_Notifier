@@ -1,4 +1,33 @@
-import { TelemetryData } from '../types/telemetry';
+// SolarGuard Financial Engine — KSEB-aware savings (V4).
+//
+// Methodology: counterfactual bill difference. Savings = what the bill
+// WOULD have been without solar, minus what it actually is:
+//
+//   monthlySavings = estimateBill(consumedMonth)           // no-solar world
+//                  − estimateBill(max(0, importedMonth − exportedMonth))
+//                                                     // net-metered reality
+//                  (both include 10% electricity duty)
+//
+// Net metering (the configured scheme): exports offset imports unit-for-
+// unit within the billing month. Exports beyond imports are NOT cash —
+// they bank, and KSEB settles them on 31 March at the APPC rate. The
+// engine reports them separately as bankedSurplusUnits so a later UI can
+// render "80 units banked (≈₹252 at APPC)" without inflating savings.
+//
+// "Today" is an estimate at the current slab's marginal rate — exact
+// daily Δbill isn't derivable without daily history. "Lifetime" spans
+// multiple tariff years and is labeled indicative.
+//
+// Battery round-trip losses (~8%) are deliberately not deducted; the data
+// model can't yet separate battery-sourced vs solar-sourced consumption.
+
+import { TelemetryData, TariffConfig } from '../types/telemetry';
+import {
+  estimateBill,
+  marginalUnitCost,
+  cliffJump,
+  DEFAULT_KSEB_TARIFF,
+} from './tariff/ksebTariff';
 
 export interface EnergyMetrics {
   solarKwh: number;
@@ -9,48 +38,108 @@ export interface EnergyMetrics {
   batteryDischargeKwh: number;
 }
 
-export interface FinancialSummary {
-  importRate: number;
-  exportRate: number;
-  importCost: number;
-  exportCredit: number;
-  avoidedBill: number;
-  netSavings: number;
-  netBill: number;
+export interface SavingsResult {
+  /** ₹ saved vs the no-solar counterfactual (duty included) */
+  savings: number;
+  /** for today: marginal ₹/unit used — null for exact counterfactuals */
+  estimatedAtRate: number | null;
 }
 
-const DEFAULT_IMPORT_RATE = 7.50; // ₹ / kWh
-const DEFAULT_EXPORT_RATE = 5.00; // ₹ / kWh
+export interface PeriodSavings {
+  today: SavingsResult;
+  monthly: SavingsResult;
+  lifetime: SavingsResult;
+  /** monthly regime at net consumption */
+  regime: 'telescopic' | 'non-telescopic';
+  /** exports this month beyond import offset — settled at APPC on 31 Mar */
+  bankedSurplusUnits: number;
+  bankedSurplusValue: number;
+  /** cliff telemetry for the current billing month */
+  cliff: {
+    /** ₹ jump between 250 and 251 monthly units (incl. duty) */
+    jump: number;
+    /** signed units from net consumption to the 250 cliff (neg = past it) */
+    distanceToCliff: number;
+    /** true when solar offset kept the month under the cliff */
+    keptUnderCliff: boolean;
+  };
+}
+
+const CLIFF_UNITS = 250;
 
 export const FinancialEngine = {
-  DEFAULT_IMPORT_RATE,
-  DEFAULT_EXPORT_RATE,
+  DEFAULT_IMPORT_RATE: 7.5, // legacy — kept for old callers
+  DEFAULT_EXPORT_RATE: 5.0, // legacy
+  DEFAULT_TARIFF: DEFAULT_KSEB_TARIFF,
 
   /**
-   * Calculate financial metrics from structured energy metrics.
+   * KSEB slab-aware savings for today / month / lifetime.
    */
-  calculate(
-    metrics: EnergyMetrics,
-    importRate: number = DEFAULT_IMPORT_RATE,
-    exportRate: number = DEFAULT_EXPORT_RATE
-  ): FinancialSummary {
-    // Energy consumed directly from solar (not exported to grid)
-    const solarConsumedDirectly = Math.max(0, metrics.solarKwh - metrics.exportedKwh);
+  computeSavings(
+    telemetry: TelemetryData | null,
+    cfg: TariffConfig = DEFAULT_KSEB_TARIFF
+  ): PeriodSavings | null {
+    if (!telemetry) return null;
 
-    const importCost = metrics.importedKwh * importRate;
-    const exportCredit = metrics.exportedKwh * exportRate;
-    const avoidedBill = solarConsumedDirectly * importRate;
-    const netSavings = avoidedBill + exportCredit;
-    const netBill = importCost - exportCredit;
+    const cycle = cfg.monthlyCycleFactor ?? 1;
+
+    // ─── Monthly — the rigorous counterfactual ────────────────────────────
+    const consumedMonth = telemetry.useMonth ?? 0;
+    const importedMonth = telemetry.buyMonth ?? 0;
+    const exportedMonth = telemetry.gridMonth ?? 0;
+
+    // Net-metered billable units: exports offset imports 1:1
+    const billableMonth = Math.max(0, importedMonth - exportedMonth);
+
+    const billWithSolar = estimateBill(billableMonth * cycle, cfg);
+    const billWithoutSolar = estimateBill(consumedMonth * cycle, cfg);
+    const monthlySavings = round2(billWithoutSolar.total - billWithSolar.total);
+
+    // ─── Today — marginal-rate estimate ───────────────────────────────────
+    // Each solar-self-consumed unit displaces the most expensive unit the
+    // household would otherwise buy this month, at the current marginal rate.
+    const solarToday = telemetry.generationValue ?? 0;
+    const exportedToday = telemetry.gridValue ?? 0;
+    const selfConsumedToday = Math.max(0, solarToday - exportedToday);
+    const offsetToday = Math.min(exportedToday, telemetry.buyValue ?? 0);
+    const displacedToday = selfConsumedToday + offsetToday;
+    const marginal = marginalUnitCost(billableMonth * cycle, cfg);
+    const dutyFactor = 1 + (cfg.electricityDutyPercent ?? 0) / 100;
+    const todaySavings = round2(displacedToday * marginal * dutyFactor);
+
+    // ─── Lifetime — indicative Δ-bill at current slabs ─────────────────────
+    const consumedTotal = telemetry.useTotal ?? 0;
+    const importedTotal = telemetry.buyTotal ?? 0;
+    const exportedTotal = telemetry.gridTotal ?? 0;
+    const billableTotal = Math.max(0, importedTotal - exportedTotal);
+    const lifetimeSavings = round2(
+      estimateBill(consumedTotal, cfg).total - estimateBill(billableTotal, cfg).total
+    );
+
+    // ─── Banking — surplus export is units, not cash ──────────────────────
+    const bankedSurplusUnits = round2(Math.max(0, exportedMonth - importedMonth));
+
+    // ─── Cliff telemetry ──────────────────────────────────────────────────
+    // All counters here are calendar-month units; the projection semantics
+    // (estimateBill(x * cycle)) scale both sides of every threshold by the
+    // same factor, so the comparisons reduce to monthly form and stay
+    // correct for bi-monthly cycles too.
+    const distanceToCliff = round2(CLIFF_UNITS - billableMonth);
 
     return {
-      importRate,
-      exportRate,
-      importCost,
-      exportCredit,
-      avoidedBill,
-      netSavings,
-      netBill,
+      today: { savings: todaySavings, estimatedAtRate: marginal },
+      monthly: { savings: monthlySavings, estimatedAtRate: null },
+      lifetime: { savings: lifetimeSavings, estimatedAtRate: null },
+      regime: billWithSolar.regime,
+      bankedSurplusUnits,
+      bankedSurplusValue: round2(bankedSurplusUnits * (cfg.appcRate ?? 0)),
+      cliff: {
+        jump: cliffJump(cfg),
+        distanceToCliff,
+        keptUnderCliff:
+          billableMonth <= CLIFF_UNITS &&
+          consumedMonth > CLIFF_UNITS,
+      },
     };
   },
 
@@ -89,24 +178,19 @@ export const FinancialEngine = {
       },
     };
   },
-
-  /**
-   * Generate complete financial metrics using settings-based rates.
-   */
-  summarize(
-    telemetry: TelemetryData | null,
-    importRate: number = DEFAULT_IMPORT_RATE,
-    exportRate: number = DEFAULT_EXPORT_RATE
-  ): {
-    today: FinancialSummary;
-    monthly: FinancialSummary;
-    lifetime: FinancialSummary;
-  } {
-    const metrics = this.getProcessedMetrics(telemetry);
-    return {
-      today: this.calculate(metrics.today, importRate, exportRate),
-      monthly: this.calculate(metrics.monthly, importRate, exportRate),
-      lifetime: this.calculate(metrics.lifetime, importRate, exportRate),
-    };
-  }
 };
+
+/** @deprecated V4 — flat-rate legacy shim; use computeSavings(). */
+export interface FinancialSummary {
+  importRate: number;
+  exportRate: number;
+  importCost: number;
+  exportCredit: number;
+  avoidedBill: number;
+  netSavings: number;
+  netBill: number;
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
