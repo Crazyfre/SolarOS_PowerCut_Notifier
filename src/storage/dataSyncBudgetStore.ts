@@ -22,6 +22,13 @@ import { Platform } from 'react-native';
 const BUDGET_KEY = 'sg_fs_datasync_budget';
 const DATA_SYNC_SELF_LIMIT_HOURS = 5.5; // 6h OS cap minus 30min safety margin
 const WINDOW_MS = 24 * 60 * 60 * 1000;
+let writes: Promise<void> = Promise.resolve();
+
+function serializeWrite<T>(action: () => Promise<T>): Promise<T> {
+  const pending = writes.then(action);
+  writes = pending.then(() => {}, () => {});
+  return pending;
+}
 
 /** Self-imposed cap in hours — surfaced in Developer diagnostics. */
 export const SELF_LIMIT_HOURS = DATA_SYNC_SELF_LIMIT_HOURS;
@@ -35,7 +42,19 @@ export interface DataSyncBudgetState {
 
 function pruneSegments(segments: [number, number][], now: number): [number, number][] {
   const cutoff = now - WINDOW_MS;
-  return segments.filter(([, end]) => end > cutoff);
+  const clipped = segments
+    .filter((segment) => Array.isArray(segment) && segment.length === 2 &&
+      segment.every(Number.isFinite) && segment[1] > cutoff && segment[1] > segment[0])
+    .map(([start, end]): [number, number] => [Math.max(start, cutoff), Math.min(end, now)])
+    .filter(([start, end]) => end > start)
+    .sort(([a], [b]) => a - b);
+  const merged: [number, number][] = [];
+  for (const [start, end] of clipped) {
+    const last = merged[merged.length - 1];
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end);
+    else merged.push([start, end]);
+  }
+  return merged;
 }
 
 function totalRuntimeMs(segments: [number, number][], now: number): number {
@@ -75,27 +94,28 @@ export const DataSyncBudgetStore = {
    * running — pass now for endMs). Prunes segments older than 24h.
    */
   async recordRuntime(startMs: number, endMs: number): Promise<DataSyncBudgetState> {
-    const state = await this.getState();
-    const now = endMs;
-    const segments = pruneSegments([...state.segments], now);
-    if (endMs > startMs) {
-      segments.push([startMs, endMs]);
-    }
-    const next: DataSyncBudgetState = {
-      segments,
-      // Once marked degraded, stay degraded until the window rolls enough
-      // that used runtime drops meaningfully below the limit.
-      exhausted:
-        state.exhausted
-          ? totalRuntimeMs(segments, now) >= SELF_LIMIT_MS * 0.5
-          : totalRuntimeMs(segments, now) >= SELF_LIMIT_MS,
-    };
-    try {
-      await AsyncStorage.setItem(BUDGET_KEY, JSON.stringify(next));
-    } catch {
-      // Non-fatal
-    }
-    return next;
+    return serializeWrite(async () => {
+      const state = await this.getState();
+      // A delayed close-out can describe an older segment. Using its end as
+      // "now" would truncate newer runtime already recorded by another run.
+      const now = Date.now();
+      const segments = pruneSegments([...state.segments, [startMs, endMs]], now);
+      const next: DataSyncBudgetState = {
+        segments,
+        // Once marked degraded, stay degraded until the window rolls enough
+        // that used runtime drops meaningfully below the limit.
+        exhausted:
+          state.exhausted
+            ? totalRuntimeMs(segments, now) >= SELF_LIMIT_MS * 0.5
+            : totalRuntimeMs(segments, now) >= SELF_LIMIT_MS,
+      };
+      try {
+        await AsyncStorage.setItem(BUDGET_KEY, JSON.stringify(next));
+      } catch {
+        // Non-fatal
+      }
+      return next;
+    });
   },
 
   /**
@@ -103,15 +123,17 @@ export const DataSyncBudgetStore = {
    * the budget was spent (set by the FGS loop right before it stops).
    */
   async markDegraded(): Promise<void> {
-    const state = await this.getState();
-    try {
-      await AsyncStorage.setItem(
-        BUDGET_KEY,
-        JSON.stringify({ ...state, exhausted: true })
-      );
-    } catch {
-      // Non-fatal
-    }
+    return serializeWrite(async () => {
+      const state = await this.getState();
+      try {
+        await AsyncStorage.setItem(
+          BUDGET_KEY,
+          JSON.stringify({ ...state, exhausted: true })
+        );
+      } catch {
+        // Non-fatal
+      }
+    });
   },
 
   /** Used FGS runtime within the 24h window, in hours (for diagnostics). */
@@ -134,10 +156,12 @@ export const DataSyncBudgetStore = {
 
   /** Clear the budget ledger (used when leaving always mode entirely). */
   async clear(): Promise<void> {
-    try {
-      await AsyncStorage.removeItem(BUDGET_KEY);
-    } catch {
-      // Non-fatal
-    }
+    return serializeWrite(async () => {
+      try {
+        await AsyncStorage.removeItem(BUDGET_KEY);
+      } catch {
+        // Non-fatal
+      }
+    });
   },
 };

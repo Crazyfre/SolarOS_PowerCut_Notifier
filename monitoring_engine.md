@@ -37,17 +37,17 @@ graph TD
    - Developer Options unlock mock telemetry, scheduled power cut/on events, a **Geofence Simulator** (ENTER/EXIT buttons + mock device position), and a monitoring-engine diagnostics panel (mode, dataSync budget, fence latency).
 
 2. **Foreground Monitoring Service (`services/foregroundService.ts`)**
-   - The single source of truth for telemetry monitoring while active.
+   - Owns background monitoring while active. UI and headless requests share in-flight HTTP requests; detections are serialized and persisted per station and simulation mode.
    - Registered via `@notifee/react-native` as a native Android foreground service.
-   - FGS type is mode-aware: `location` in geofenced mode (no OS time cap), `dataSync` in always mode. The manifest (`plugins/withAndroidForegroundService.js`) declares `dataSync|location`.
-   - **Per-cycle geofence guard:** if the store says outside, runs one remote-mode poll then stops (stale run / missed EXIT).
+   - FGS type is pinned for each run: `location` when the geofence is armed and permission is available, `dataSync` otherwise. Every notification explicitly selects that same type. The manifest (`plugins/withAndroidForegroundService.js`) declares `dataSync|location`.
+   - **Per-cycle geofence guard:** confirmed outside state allows one remote-mode poll then stops, including on request failure. Unknown state remains siren-capable. Stopped runs cannot apply an in-flight HTTP result or recreate the persistent notification.
    - **Missed-EXIT self-healing:** each cycle verifies real device position; two consecutive outside samples correct the fence state and stop the FGS (anti-flap hysteresis — one bad GPS fix never kills monitoring).
-   - **dataSync budget guard (Android 15+, dataSync-typed runs):** tracks FGS runtime in a rolling 24h window; when the self-imposed 5.5h limit is reached, degrades to remote polling (notification-only alarms) and stops the service rather than letting the OS kill it. Applies to always mode and the geofenced-without-zone / fence-arm-failure fallbacks; the FGS type is resolved from settings at every notification update so it never flips mid-run.
+   - **dataSync budget guard (Android 15+, dataSync-typed runs):** tracks FGS runtime in a rolling 24h window; at the self-imposed 5.5h limit it hands off to remote polling (notification-only alarms) and stops the service. Applies to always mode and geofence fallbacks. The selected FGS type remains fixed for each run, including error notifications.
 
 3. **Geofence lifecycle (`services/geofenceService.ts`, `services/geofenceTasks.ts`)**
    - `expo-location.startGeofencingAsync` arms a circular fence (100–2000 m radius) in Play Services; monitoring happens in Google's process — zero app battery cost while armed.
-   - ENTER/EXIT transitions arrive as headless `TaskManager` tasks, **even when the app process was killed** — Android spins up the process and boots a headless JS context (15 s execution budget).
-   - ENTER → start monitoring FGS (siren-capable). EXIT → final remote poll → stop FGS.
+   - ENTER/EXIT transitions arrive as headless `TaskManager` tasks when Android permits background execution. Actual delivery and process recovery require device validation.
+   - ENTER → start monitoring FGS (siren-capable). EXIT → stop FGS → final remote poll, so an unavailable API cannot delay service shutdown.
    - Transition latency (task entry → FGS started) is measured and surfaced in diagnostics.
 
 4. **Remote polling (`services/remotePolling.ts`)**

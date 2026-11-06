@@ -11,7 +11,7 @@ export const REMOTE_POLL_MIN_INTERVAL_MINUTES = 15;
 export async function armRemotePolling(): Promise<void> {
   try {
     await BackgroundFetch.registerTaskAsync(GEOFENCE_REMOTE_POLL_TASK, {
-      minimumInterval: REMOTE_POLL_MIN_INTERVAL_MINUTES,
+      minimumInterval: REMOTE_POLL_MIN_INTERVAL_MINUTES * 60,
       stopOnTerminate: false,
       startOnBoot: true,
     });

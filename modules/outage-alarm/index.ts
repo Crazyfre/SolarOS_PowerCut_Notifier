@@ -1,4 +1,4 @@
-import { requireNativeModule } from 'expo';
+import { requireOptionalNativeModule } from 'expo';
 
 export interface OutageAlarmOptions {
   reason: string;
@@ -12,9 +12,17 @@ interface OutageAlarmModuleType {
   stopAlarm(): void;
   isAlarmPlaying(): boolean;
   isIgnoringBatteryOptimizations(): boolean;
-  /** Stable per-boot identifier (wallClock - elapsedRealtime). */
+  /** Stable OS boot counter; empty when unavailable. */
   getBootId(): string;
 }
 
-const OutageAlarm = requireNativeModule<OutageAlarmModuleType>('OutageAlarm');
+const nativeModule = requireOptionalNativeModule<OutageAlarmModuleType>('OutageAlarm');
+const unavailable = (): never => { throw new Error('Native alarms require an Android development or release build.'); };
+const OutageAlarm: OutageAlarmModuleType = nativeModule ?? {
+  triggerAlarm: unavailable,
+  stopAlarm: () => {},
+  isAlarmPlaying: () => false,
+  isIgnoringBatteryOptimizations: unavailable,
+  getBootId: () => '',
+};
 export default OutageAlarm;

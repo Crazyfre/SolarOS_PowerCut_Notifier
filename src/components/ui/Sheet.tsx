@@ -3,10 +3,12 @@
 
 import React from 'react';
 import { Modal, View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, Typography, Spacing, BorderRadius } from '../../theme';
 import { Button } from './Button';
 
 export interface SheetRowProps {
+  id?: string;
   title: string;
   subtitle?: string;
   icon?: React.ReactNode;
@@ -52,14 +54,16 @@ interface SheetProps {
 
 export function Sheet({ visible, title, subtitle, onClose, children, rows }: SheetProps) {
   const { colors, shadows } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
-    <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
+    <Modal transparent statusBarTranslucent navigationBarTranslucent animationType="slide" visible={visible} onRequestClose={onClose}>
       <View style={[styles.overlay, { backgroundColor: colors.overlay }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
         <View
           style={[
             styles.sheet,
+            { paddingBottom: Spacing['2xl'] + insets.bottom },
             { backgroundColor: colors.surface3, borderColor: colors.border },
             shadows.sheet as object,
           ]}
@@ -72,7 +76,7 @@ export function Sheet({ visible, title, subtitle, onClose, children, rows }: She
           {rows ? (
             <FlatList
               data={rows}
-              keyExtractor={(r) => r.title}
+              keyExtractor={(r, index) => r.id ?? `${r.title}:${index}`}
               renderItem={({ item }) => <SheetRow {...item} />}
               ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
               style={styles.list}

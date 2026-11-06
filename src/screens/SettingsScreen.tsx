@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Platform,
   Linking,
   AppState,
+  KeyboardAvoidingView,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -56,7 +57,7 @@ import {
   MapPin,
   Crosshair,
   TriangleAlert,
-} from 'lucide-react-native';
+} from '../components/icons';
 import {
   DEFAULT_ZONE_RADIUS_METERS,
   MIN_ZONE_RADIUS_METERS,
@@ -66,11 +67,7 @@ import {
   getLocationPermissions,
   getCurrentLocation,
   normalizeZone,
-  registerGeofence,
-  unregisterGeofence,
   isGeofenceRegistered,
-  armRemotePolling,
-  disarmRemotePolling,
 } from '../services/geofenceService';
 import { handleGeofenceTransition } from '../services/geofenceTasks';
 import { DataSyncBudgetStore, isDataSyncBudgetEnforced, SELF_LIMIT_HOURS } from '../storage/dataSyncBudgetStore';
@@ -88,15 +85,18 @@ type RootStackParamList = {
 type NavigationProp = StackNavigationProp<RootStackParamList, 'Settings'>;
 
 export function SettingsScreen() {
-  const { settings, updateSettings, logout, refreshTelemetry } = useApp();
+  const { settings, settingsLoaded, systemId, updateSettings, logout, refreshTelemetry } = useApp();
+  const [isSaving, setIsSaving] = useState(false);
+  const saveInFlight = useRef(false);
   const { colors } = useTheme();
   const navigation = useNavigation<NavigationProp>();
 
   // Permissions State
-  const [hasNotificationPermission, setHasNotificationPermission] = useState<boolean | null>(null);
-  const [isBatteryOptimizationBypassed, setIsBatteryOptimizationBypassed] = useState<boolean | null>(null);
+  const [hasNotificationPermission, setHasNotificationPermission] = useState<boolean | null | 'unavailable'>(null);
+  const [isBatteryOptimizationBypassed, setIsBatteryOptimizationBypassed] = useState<boolean | null | 'unavailable'>(null);
 
   // Developer overrides state
+  const [devOverridesStatus, setDevOverridesStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [devOverridesEnabled, setDevOverridesEnabled] = useState(false);
   const [devGridRelayStatus, setDevGridRelayStatus] = useState<'on' | 'off'>('on');
   const [devBatteryStatus, setDevBatteryStatus] = useState<string>('CHARGE');
@@ -148,10 +148,10 @@ export function SettingsScreen() {
   const [zoneLat, setZoneLat] = useState(settings.homeZone ? String(settings.homeZone.lat) : '');
   const [zoneLng, setZoneLng] = useState(settings.homeZone ? String(settings.homeZone.lng) : '');
   const [zoneRadius, setZoneRadius] = useState(String(settings.homeZone?.radiusMeters ?? DEFAULT_ZONE_RADIUS_METERS));
-  const [locationPermissions, setLocationPermissions] = useState<{ foreground: boolean; background: boolean }>({ foreground: false, background: false });
-  const [geofenceRegistered, setGeofenceRegistered] = useState(false);
-  const [zoneStatus, setZoneStatus] = useState<string>('');
-  const [zoneLastEvent, setZoneLastEvent] = useState<string>('');
+  const [locationPermissions, setLocationPermissions] = useState<{ foreground: boolean; background: boolean } | null | 'unavailable'>(null);
+  const [geofenceRegistered, setGeofenceRegistered] = useState<boolean | null | 'unavailable'>(null);
+  const [zoneStatus, setZoneStatus] = useState<string>('Checking');
+  const [zoneLastEvent, setZoneLastEvent] = useState<string>('Checking');
 
   // Developer features visibility & diagnostics state
   const isFocused = useIsFocused();
@@ -231,29 +231,35 @@ export function SettingsScreen() {
 
   // Stations List state
   const [stations, setStations] = useState<SolarStation[]>([]);
-  const [activeStationId, setActiveStationId] = useState<string | null>(settings.activeStationId ?? null);
+  const [activeStationId, setActiveStationId] = useState<string | null>(settings.activeStationId ?? systemId);
   const [isLoadingStations, setIsLoadingStations] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       setIsLoadingStations(true);
       try {
         const list = await StationService.getStations();
+        if (cancelled) return;
         setStations(list);
-
-        // If there is no active station select the first one
-        if (!activeStationId && list.length > 0) {
-          setActiveStationId(list[0].id);
-        }
+        setActiveStationId((current) => current || list[0]?.id || null);
       } catch (err) {
         console.warn('Failed to load stations:', err);
       } finally {
-        setIsLoadingStations(false);
+        if (!cancelled) setIsLoadingStations(false);
       }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-      // Load developer overrides
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
       try {
         const overrides = await DevOverridesStore.getOverrides();
+        if (cancelled) return;
         setDevOverridesEnabled(overrides.enabled);
         setDevGridRelayStatus(overrides.gridRelayStatus ?? 'on');
         setDevBatteryStatus(overrides.batteryStatus ?? 'CHARGE');
@@ -271,69 +277,102 @@ export function SettingsScreen() {
           setDevMockPositionLat(String(overrides.mockPosition.lat));
           setDevMockPositionLng(String(overrides.mockPosition.lng));
         }
+        setDevOverridesStatus('ready');
       } catch (err) {
         console.warn('Failed to load developer overrides:', err);
+        if (!cancelled) setDevOverridesStatus('unavailable');
       }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-      // Check notification permissions
-      try {
-        const { status } = await Notifications.getPermissionsAsync();
-        setHasNotificationPermission(status === 'granted');
-      } catch (err) {
-        console.warn('Failed to check notification permissions:', err);
-      }
-
-      // Check battery optimization status
-      try {
-        if (Platform.OS === 'android') {
-          const ignored = OutageAlarm.isIgnoringBatteryOptimizations();
-          setIsBatteryOptimizationBypassed(ignored);
-        } else {
-          setIsBatteryOptimizationBypassed(true);
+  useEffect(() => {
+    let cancelled = false;
+    const createCheck = <T,>(
+      load: () => T | Promise<T>,
+      apply: (value: T) => void,
+      checking: () => void,
+      unavailable: () => void,
+    ) => {
+      let sequence = 0;
+      return async () => {
+        if (cancelled) return;
+        const request = ++sequence;
+        checking();
+        try {
+          const value = await load();
+          if (!cancelled && request === sequence) apply(value);
+        } catch (err) {
+          if (!cancelled && request === sequence) {
+            console.warn('Failed to check settings status:', err);
+            unavailable();
+          }
         }
-      } catch (err) {
-        console.warn('Failed to check battery optimization status:', err);
-      }
-
-      // Location-aware monitoring state
-      try {
-        const perms = await getLocationPermissions();
-        setLocationPermissions(perms);
-        setGeofenceRegistered(await isGeofenceRegistered());
-        const geoState = await GeofenceStore.getState();
-        if (geoState.inside === true) setZoneStatus('Inside home zone');
-        else if (geoState.inside === false) setZoneStatus('Outside home zone');
-        else setZoneStatus('No transition seen yet');
-        const lastEvent = await GeofenceStore.getLastEvent();
+      };
+    };
+    const checkNotifications = createCheck(
+      () => Notifications.getPermissionsAsync(),
+      ({ status }) => setHasNotificationPermission(status === 'granted'),
+      () => setHasNotificationPermission(null),
+      () => setHasNotificationPermission('unavailable'),
+    );
+    const checkBattery = createCheck(
+      () => Platform.OS === 'android' ? OutageAlarm.isIgnoringBatteryOptimizations() : true,
+      setIsBatteryOptimizationBypassed,
+      () => setIsBatteryOptimizationBypassed(null),
+      () => setIsBatteryOptimizationBypassed('unavailable'),
+    );
+    const checkLocation = createCheck(
+      getLocationPermissions,
+      (permissions) => setLocationPermissions(permissions),
+      () => setLocationPermissions(null),
+      () => setLocationPermissions('unavailable'),
+    );
+    const checkGeofence = createCheck(
+      isGeofenceRegistered,
+      (registered) => setGeofenceRegistered(registered),
+      () => setGeofenceRegistered(null),
+      () => setGeofenceRegistered('unavailable'),
+    );
+    const checkZone = createCheck(
+      () => GeofenceStore.getState(),
+      (geoState) => setZoneStatus(geoState.inside === true
+        ? 'Inside home zone'
+        : geoState.inside === false ? 'Outside home zone' : 'No transition seen yet'),
+      () => setZoneStatus('Checking'),
+      () => setZoneStatus('Unavailable'),
+    );
+    const checkLastEvent = createCheck(
+      () => GeofenceStore.getLastEvent(),
+      (lastEvent) => {
         if (lastEvent) {
           const at = new Date(lastEvent.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
           const kindText = lastEvent.kind === 'ENTER' ? 'enter' : lastEvent.kind === 'EXIT' ? 'exit' : 'reset';
           setZoneLastEvent(`Last ${kindText} at ${at}`);
+        } else {
+          setZoneLastEvent('');
         }
-      } catch (err) {
-        console.warn('Failed to load geofence state:', err);
-      }
-    })();
-  }, []);
-
-  // Re-check permissions and battery optimization status when app returns from background
-  useEffect(() => {
+      },
+      () => setZoneLastEvent('Checking'),
+      () => setZoneLastEvent('Unavailable'),
+    );
+    const refreshStatus = () => {
+      void checkNotifications();
+      void checkBattery();
+      void checkLocation();
+      void checkGeofence();
+      void checkZone();
+      void checkLastEvent();
+    };
+    refreshStatus();
     const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active') {
-        Notifications.getPermissionsAsync().then(({ status }) => {
-          setHasNotificationPermission(status === 'granted');
-        }).catch(() => {});
-
-        if (Platform.OS === 'android') {
-          try {
-            const ignored = OutageAlarm.isIgnoringBatteryOptimizations();
-            setIsBatteryOptimizationBypassed(ignored);
-          } catch (err) {}
-        }
-      }
+      if (nextAppState === 'active') refreshStatus();
     });
 
     return () => {
+      cancelled = true;
       subscription.remove();
     };
   }, []);
@@ -348,7 +387,11 @@ export function SettingsScreen() {
     );
   };
 
-  const handleSave = async () => {
+  const savePreferences = async () => {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(quietHoursStart) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(quietHoursEnd)) {
+      Alert.alert('Invalid Input', 'Quiet hours must use HH:MM times, such as 23:00 or 07:00.');
+      return;
+    }
     const thresholdNum = parseInt(batteryWarningThreshold, 10);
     if (isNaN(thresholdNum) || thresholdNum < 10 || thresholdNum > 50) {
       Alert.alert('Invalid Input', 'Battery Warning Threshold must be between 10% and 50%.');
@@ -356,7 +399,7 @@ export function SettingsScreen() {
     }
 
     const capacityNum = parseFloat(batteryCapacity);
-    if (isNaN(capacityNum) || capacityNum <= 0) {
+    if (!Number.isFinite(capacityNum) || capacityNum <= 0) {
       Alert.alert('Invalid Input', 'Battery capacity must be a positive number.');
       return;
     }
@@ -446,8 +489,6 @@ export function SettingsScreen() {
       }
     }
 
-    await updateSettings(updated);
-
     // Save developer overrides
     const socVal = parseInt(devBatterySoc, 10);
     const powerVal = parseInt(devBatteryPower, 10);
@@ -480,27 +521,15 @@ export function SettingsScreen() {
       mockPosition: hasMockPosition ? { lat: mockLat, lng: mockLng } : undefined,
     };
 
-    await DevOverridesStore.saveOverrides(overrides);
+    if (devOverridesStatus === 'ready') await DevOverridesStore.saveOverrides(overrides);
+    await updateSettings(updated);
 
     // Arm/disarm the native geofence to match the saved configuration.
     // Remote polling stays armed when a dataSync budget degradation is
     // active: it's the only detection path until the 24h window rolls
     // (shouldRemotePoll admits those runs via the exhausted flag).
     try {
-      if (monitoringMode === 'geofenced' && zone) {
-        await registerGeofence(zone);
-        await armRemotePolling();
-      } else {
-        await unregisterGeofence();
-        const budgetDegraded =
-          isDataSyncBudgetEnforced() &&
-          (await DataSyncBudgetStore.getState().then((s) => s.exhausted === true));
-        if (budgetDegraded) {
-          await armRemotePolling();
-        } else {
-          await disarmRemotePolling();
-        }
-      }
+      // AppContext owns monitoring lifecycle changes after settings commit.
       setGeofenceRegistered(await isGeofenceRegistered());
     } catch (err) {
       console.warn('Failed to sync geofence registration:', err);
@@ -512,6 +541,15 @@ export function SettingsScreen() {
     Alert.alert('Success', 'Settings saved successfully!', [
       { text: 'OK', onPress: () => navigation.goBack() },
     ]);
+  };
+
+  const handleSave = async () => {
+    if (saveInFlight.current || !settingsLoaded) return;
+    saveInFlight.current = true;
+    setIsSaving(true);
+    try { await savePreferences(); }
+    catch (error) { Alert.alert('Save Failed', error instanceof Error ? error.message : 'Unable to save preferences. Please try again.'); }
+    finally { saveInFlight.current = false; setIsSaving(false); }
   };
 
   // â”€â”€â”€ Logout handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -539,7 +577,7 @@ export function SettingsScreen() {
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.root, { backgroundColor: colors.background }]}>
       <ScreenHeader
         title="Settings"
         left={
@@ -551,7 +589,7 @@ export function SettingsScreen() {
         }
       />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}>
         {/* SIMULATION ACTIVE WARNING BANNER */}
         {devOverridesEnabled ? (
           <View
@@ -618,6 +656,7 @@ export function SettingsScreen() {
                 </SettingRow>
                 <SegmentedControl
                   options={ALARM_SOUND_OPTIONS.map(o => ({ value: o.id as typeof alarmSoundName, label: o.name }))}
+                  wrap
                   value={alarmSoundName}
                   onChange={setAlarmSoundName}
                 />
@@ -677,7 +716,9 @@ export function SettingsScreen() {
                   : 'Required to play sirens and alert banners'
               }
             >
-              {hasNotificationPermission === true ? (
+              {hasNotificationPermission === null || hasNotificationPermission === 'unavailable' ? (
+                <Badge label={hasNotificationPermission === null ? 'Checking' : 'Unavailable'} />
+              ) : hasNotificationPermission === true ? (
                 <Badge label="Granted" tone="success" />
               ) : (
                 <Button
@@ -704,7 +745,9 @@ export function SettingsScreen() {
                   : 'Prevent Android from killing background monitoring'
               }
             >
-              {isBatteryOptimizationBypassed === true ? (
+              {isBatteryOptimizationBypassed === null || isBatteryOptimizationBypassed === 'unavailable' ? (
+                <Badge label={isBatteryOptimizationBypassed === null ? 'Checking' : 'Unavailable'} />
+              ) : isBatteryOptimizationBypassed === true ? (
                 <Badge label="Configured" tone="success" />
               ) : (
                 <Button
@@ -752,7 +795,10 @@ export function SettingsScreen() {
             icon={<MapPin size={14} color={colors.textSecondary} strokeWidth={2} />}
             right={
               monitoringMode === 'geofenced' ? (
-                <Badge label={geofenceRegistered ? 'Armed' : 'Idle'} tone={geofenceRegistered ? 'success' : 'warning'} />
+                <Badge
+                  label={geofenceRegistered === null ? 'Checking' : geofenceRegistered === 'unavailable' ? 'Unavailable' : geofenceRegistered ? 'Armed' : 'Idle'}
+                  tone={geofenceRegistered === true ? 'success' : geofenceRegistered === false ? 'warning' : 'neutral'}
+                />
               ) : undefined
             }
           />
@@ -780,14 +826,20 @@ export function SettingsScreen() {
                 <SettingRow
                   title="Location Permission"
                   subtitle={
-                    locationPermissions.background
-                      ? 'Background location granted ("Allow all the time")'
-                      : locationPermissions.foreground
-                        ? 'Foreground granted â€” background ("Allow all the time") required for the fence'
-                        : 'Location permission required to arm the home zone'
+                    locationPermissions === null
+                      ? 'Checking'
+                      : locationPermissions === 'unavailable'
+                        ? 'Unavailable'
+                        : locationPermissions.background === true
+                          ? 'Background location granted ("Allow all the time")'
+                          : locationPermissions.foreground === true
+                            ? 'Foreground granted â€” background ("Allow all the time") required for the fence'
+                            : 'Location permission required to arm the home zone'
                   }
                 >
-                  {locationPermissions.background ? (
+                  {locationPermissions === null || locationPermissions === 'unavailable' ? (
+                    <Badge label={locationPermissions === null ? 'Checking' : 'Unavailable'} />
+                  ) : locationPermissions.background === true ? (
                     <Badge label="Granted" tone="success" />
                   ) : (
                     <Button
@@ -864,7 +916,7 @@ export function SettingsScreen() {
                     </Text>
                     {zoneLastEvent ? (
                       <Text style={[styles.zoneHint, { color: colors.textDisabled, marginTop: 2 }]}>
-                        {zoneLastEvent} Â· Fence {geofenceRegistered ? 'armed' : 'not armed'}
+                        {zoneLastEvent} Â· Fence {geofenceRegistered === null ? 'Checking' : geofenceRegistered === 'unavailable' ? 'Unavailable' : geofenceRegistered === true ? 'armed' : 'not armed'}
                       </Text>
                     ) : null}
                   </>
@@ -1084,6 +1136,8 @@ export function SettingsScreen() {
             </Card>
 
             {/* Test actions & overrides */}
+            {devOverridesStatus === 'ready' ? (
+              <>
             <Card style={{ marginTop: Spacing.md }}>
               <SettingRow title="Test Alarm System" subtitle="Trigger critical alarm sound test">
                 <Button
@@ -1219,7 +1273,10 @@ export function SettingsScreen() {
                 title="Geofence Simulator"
                 subtitle="Simulate ENTER/EXIT transitions (runs the real geofence handler)"
               >
-                <Badge label={geofenceRegistered ? 'Fence armed' : 'No fence'} tone={geofenceRegistered ? 'success' : 'warning'} />
+                <Badge
+                  label={geofenceRegistered === null ? 'Checking' : geofenceRegistered === 'unavailable' ? 'Unavailable' : geofenceRegistered === true ? 'Fence armed' : 'No fence'}
+                  tone={geofenceRegistered === true ? 'success' : geofenceRegistered === false ? 'warning' : 'neutral'}
+                />
               </SettingRow>
 
               <View style={styles.devInputGrid}>
@@ -1306,11 +1363,19 @@ export function SettingsScreen() {
                 Requires Mock Telemetry Overrides to be ON and saved. Set the position outside your zone radius, then watch the next poll cycle correct a "missed EXIT".
               </Text>
             </Card>
+              </>
+            ) : (
+              <Card style={{ marginTop: Spacing.md }}>
+                <SettingRow title="Developer Overrides">
+                  <Badge label={devOverridesStatus === 'loading' ? 'Checking' : 'Unavailable'} />
+                </SettingRow>
+              </Card>
+            )}
           </View>
         ) : null}
 
         {/* SAVE */}
-        <Button label="Save Preferences" onPress={handleSave} full style={{ marginTop: Spacing.md }} />
+        <Button label={isSaving ? 'Saving...' : 'Save Preferences'} onPress={handleSave} disabled={isSaving || !settingsLoaded} full style={{ marginTop: Spacing.md }} />
 
         {/* ABOUT ROW */}
         <TouchableOpacity
@@ -1338,7 +1403,7 @@ export function SettingsScreen() {
         </Text>
       </ScrollView>
       <SafeAreaView edges={['bottom']} style={{ backgroundColor: colors.background }} />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

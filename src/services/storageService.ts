@@ -1,31 +1,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Store } from '../storage/secureStore';
 import { AppSettings, OutageRecord } from '../types/telemetry';
-import { DEFAULT_SETTINGS } from '../storage/settingsStore';
+import { SettingsStore } from '../storage/settingsStore';
 
-const SETTINGS_KEY = 'solarguard_settings';
 const OUTAGE_HISTORY_KEY = 'sg_outage_history';
 
 export const StorageService = {
   // --- Settings ---
   async getSettings(): Promise<AppSettings> {
-    try {
-      const raw = await AsyncStorage.getItem(SETTINGS_KEY);
-      if (!raw) return DEFAULT_SETTINGS;
-      const parsed = JSON.parse(raw);
-      return { ...DEFAULT_SETTINGS, ...parsed };
-    } catch (error) {
-      console.error('[StorageService] Failed to load settings:', error);
-      return DEFAULT_SETTINGS;
-    }
+    return SettingsStore.loadSettings();
   },
 
   async saveSettings(settings: AppSettings): Promise<void> {
-    try {
-      await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    } catch (error) {
-      console.error('[StorageService] Failed to save settings:', error);
-    }
+    await SettingsStore.saveSettings(settings);
   },
 
   // --- Outage History ---

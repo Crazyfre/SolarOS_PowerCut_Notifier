@@ -94,6 +94,7 @@ const styles = StyleSheet.create({
   },
   titleBlock: {
     flex: 1,
+    minWidth: 0,
   },
   titleRow: {
     flexDirection: 'row',
@@ -101,11 +102,13 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   title: {
+    flexShrink: 1,
     fontFamily: Typography.fontFamily.displayBold,
     fontSize: Typography.fontSize.xl,
     letterSpacing: -0.3,
   },
   live: {
+    flexShrink: 1,
     fontFamily: Typography.fontFamily.medium,
     fontSize: Typography.fontSize.xs,
   },
@@ -115,6 +118,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   action: {
+    flexShrink: 0,
     width: 44,
     height: 44,
     borderRadius: 22,

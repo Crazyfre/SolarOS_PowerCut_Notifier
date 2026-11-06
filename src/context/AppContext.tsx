@@ -21,6 +21,7 @@ import {
   disarmRemotePolling,
   registerGeofence,
   unregisterGeofence,
+  resolveEffectiveMode,
 } from '../services/geofenceService';
 import { GeofenceStore, GeofenceState } from '../storage/geofenceStore';
 import { DataSyncBudgetStore } from '../storage/dataSyncBudgetStore';
@@ -48,6 +49,7 @@ interface AppContextValue {
 
   // Settings
   settings: AppSettings;
+  settingsLoaded: boolean;
   updateSettings: (newSettings: AppSettings) => Promise<void>;
 
   // Geofence
@@ -76,6 +78,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
 
   const [outageHistory, setOutageHistory] = useState<OutageRecord[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [geofenceState, setGeofenceState] = useState<GeofenceState>({
     inside: null,
@@ -89,6 +92,12 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const systemIdRef = useRef(systemId);
+  const settingsRef = useRef(settings);
+  const fetchInFlight = useRef<{ key: string; promise: Promise<void> } | null>(null);
+  const modeQueue = useRef<Promise<void>>(Promise.resolve());
+  systemIdRef.current = systemId;
+  settingsRef.current = settings;
 
   // ─── Load initial state (Auth & Settings) ──────────────────────────────────
 
@@ -101,9 +110,11 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
         setSettings(storedSettings);
 
         if (token && sid) {
+          const selectedId = storedSettings.activeStationId || sid;
+          if (selectedId !== sid) await Store.setSystemId(selectedId);
           setIsLoggedIn(true);
-          setSystemId(sid);
-          const history = await loadOutageHistory();
+          setSystemId(selectedId);
+          const history = await loadOutageHistory(selectedId);
           setOutageHistory(history);
         }
 
@@ -114,63 +125,87 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
         
         // Check for updates on startup
         checkForUpdates().then(setUpdateInfo).catch(() => {});
+      } catch (err) {
+        console.warn('[AppContext] Startup load failed:', err);
       } finally {
+        // Always resolve — never leave consumers waiting on a failed load.
+        setSettingsLoaded(true);
         setIsAuthLoading(false);
       }
     })();
   }, []);
 
+  // Safety net: if settings somehow remain unloaded after the startup gate
+  // cleared, recover immediately instead of leaving consumers stuck.
+  useEffect(() => {
+    if (settingsLoaded || isAuthLoading) return;
+    let active = true;
+    SettingsStore.loadSettings().then((stored) => {
+      if (active) {
+        setSettings(stored);
+        setSettingsLoaded(true);
+      }
+    }).catch(() => {
+      if (active) setSettingsLoaded(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [settingsLoaded, isAuthLoading]);
+
   // ─── Telemetry fetch ──────────────────────────────────────────────────────
 
   const refreshTelemetry = useCallback(async () => {
-    if (!systemId) return;
-    setIsFetching(true);
-    setFetchError(null);
-    try {
-      // In geofenced mode, foreground polls inherit the fence context so the
-      // siren gate stays correct even when the UI is open while outside.
-      const remote =
-        settings.monitoringMode === 'geofenced' &&
-        !!settings.homeZone &&
-        (await GeofenceStore.getState()).inside === false;
+    const sid = systemIdRef.current;
+    if (!sid) return;
+    const version = Store.getSessionVersion();
+    const key = `${version}:${sid}`;
+    if (fetchInFlight.current?.key === key) return fetchInFlight.current.promise;
+    const current = () => systemIdRef.current === sid && Store.getSessionVersion() === version;
+    const promise = (async () => {
+      setIsFetching(true);
+      setFetchError(null);
+      try {
+        const data = await fetchTelemetry(sid);
+        if (!current()) return;
+        const currentSettings = settingsRef.current;
+        // Foreground polls inherit the fence context even when the UI is open.
+        const remote =
+          currentSettings.monitoringMode === 'geofenced' &&
+          !!currentSettings.homeZone &&
+          await resolveEffectiveMode(currentSettings) === 'geofenced' &&
+          (await GeofenceStore.getState()).inside === false;
 
-      const data = await fetchTelemetry(systemId);
-      setTelemetry(data);
-      setLastFetchTime(Date.now());
-
-      // Pass the current user settings to detectAndAlert
-      await detectAndAlert(data, settings, { remote });
-
-      // Reload history in case a new outage was recorded
-      const history = await loadOutageHistory();
-      setOutageHistory(history);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Fetch failed';
-      setFetchError(msg === 'AUTH_REQUIRED' ? 'Session expired. Please log in again.' : msg);
-    } finally {
-      setIsFetching(false);
-    }
-  }, [systemId, settings]);
+        if (!current()) return;
+        await detectAndAlert(data, currentSettings, { remote });
+        const history = await loadOutageHistory(sid);
+        if (!current()) return;
+        setTelemetry(data);
+        setLastFetchTime(Date.now());
+        setOutageHistory(history);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Fetch failed';
+        if (current()) setFetchError(msg === 'AUTH_REQUIRED' ? 'Session expired. Please log in again.' : msg);
+      } finally {
+        if (current()) setIsFetching(false);
+      }
+    })();
+    fetchInFlight.current = { key, promise };
+    try { await promise; }
+    finally { if (fetchInFlight.current?.promise === promise) fetchInFlight.current = null; }
+  }, []);
 
   // ─── Foreground polling ───────────────────────────────────────────────────
 
   useEffect(() => {
     if (!isLoggedIn || !systemId) return;
 
-    // Initial fetch
-    refreshTelemetry();
-
-    // Poll while foregrounded
-    pollTimerRef.current = setInterval(refreshTelemetry, FOREGROUND_POLL_INTERVAL_MS);
-
-    return () => {
+    const stopTimer = () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
     };
-  }, [isLoggedIn, systemId, refreshTelemetry]);
-
-  // Pause polling when app backgrounds, resume on foreground
-  useEffect(() => {
-    const sub = RNAppState.addEventListener('change', (state) => {
+    const sync = (state: typeof RNAppState.currentState) => {
+      stopTimer();
       if (state === 'active') {
         // Fence state may have changed via headless task while backgrounded.
         GeofenceStore.getState().then(setGeofenceState).catch(() => {});
@@ -183,29 +218,33 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
           // Covers location-services toggles, Play Services fence wipes and
           // OEM interference that happen while we're backgrounded.
           // registerGeofence is idempotent (expo-location replaces registration).
-          const settingsNow = settings;
+          const settingsNow = settingsRef.current;
           if (settingsNow.monitoringMode === 'geofenced' && settingsNow.homeZone) {
             registerGeofence(settingsNow.homeZone).catch(() => {});
           }
         }
-      } else if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
       }
-    });
-    return () => sub.remove();
-  }, [isLoggedIn, systemId, refreshTelemetry, settings]);
+    };
+    const sub = RNAppState.addEventListener('change', sync);
+    sync(RNAppState.currentState);
+    return () => { stopTimer(); sub.remove(); };
+  }, [isLoggedIn, systemId, refreshTelemetry]);
 
   // ─── Monitoring Mode Router (foreground service + geofence) ────────────────
   // 'always': FGS runs unconditionally (legacy behavior).
   // 'geofenced': FGS runs only while inside the home zone; the native
   // geofence owns ENTER/EXIT wake-ups and background-fetch owns remote polls.
   useEffect(() => {
+    if (isAuthLoading || !settingsLoaded) return;
+    let cancelled = false;
     if (!(isLoggedIn && systemId)) {
-      ForegroundServiceManager.stopService().catch(() => {});
-      unregisterGeofence().catch(() => {});
-      disarmRemotePolling().catch(() => {});
-      return;
+      modeQueue.current = modeQueue.current.catch(() => {}).then(async () => {
+        if (cancelled) return;
+        await ForegroundServiceManager.stopService().catch(() => {});
+        await unregisterGeofence().catch(() => {});
+        await disarmRemotePolling().catch(() => {});
+      });
+      return () => { cancelled = true; };
     }
 
     const applyMode = async () => {
@@ -219,12 +258,9 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
       }
 
       if (settings.monitoringMode === 'geofenced' && settings.homeZone) {
-        // Geofenced mode runs a location-typed FGS (no time cap) — the
-        // dataSync budget ledger is irrelevant here.
-        await DataSyncBudgetStore.clear().catch(() => {});
-
         // Arm the native fence (idempotent) + remote polling safety net.
         const armed = await registerGeofence(settings.homeZone);
+        if (cancelled) return;
         if (!armed) {
           // Degrade to always-on monitoring rather than losing alarms.
           console.warn('[AppContext] Geofence arm failed — falling back to always-on monitoring.');
@@ -237,6 +273,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
         await GeofenceStore.stampBootMarker();
 
         const geo = await GeofenceStore.getState();
+        if (cancelled) return;
         setGeofenceState(geo);
         if (geo.inside !== false) {
           // Inside (or unknown — fail loud) -> siren-capable monitoring.
@@ -251,6 +288,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
         // 'always' mode: teardown fence + remote polling, run FGS per legacy toggle.
         await unregisterGeofence();
         await disarmRemotePolling();
+        if (cancelled) return;
         if (settings.foregroundServiceEnabled) {
           // Budget recovery: if the 24h dataSync window rolled over since
           // degradation, clear the exhausted flag and let the FGS run again.
@@ -273,26 +311,31 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
           });
         } else {
           await ForegroundServiceManager.stopService().catch(() => {});
-          // User disabled the FGS entirely — budget no longer relevant.
-          await DataSyncBudgetStore.clear().catch(() => {});
         }
       }
     };
 
-    applyMode().catch((err) => {
+    modeQueue.current = modeQueue.current.catch(() => {}).then(async () => {
+      if (!cancelled) await applyMode();
+    }).catch((err) => {
       console.warn('[AppContext] Mode router failed:', err);
     });
-  }, [isLoggedIn, systemId, settings.monitoringMode, settings.homeZone, settings.foregroundServiceEnabled]);
+    return () => { cancelled = true; };
+  }, [isAuthLoading, settingsLoaded, isLoggedIn, systemId, settings.monitoringMode, settings.homeZone, settings.foregroundServiceEnabled]);
 
   // ─── Actions ──────────────────────────────────────────────────────────────
 
   const login = useCallback(
     async (tokens: AuthTokens, sid: string, email: string) => {
-      await Store.setAccessToken(tokens.access_token);
-      await Store.setRefreshToken(tokens.refresh_token);
-      await Store.setTokenExpiry(tokens.expires_in);
+      Store.invalidateSession();
+      await Store.saveTokens(tokens);
       await Store.setSystemId(sid);
       await Store.setEmail(email);
+      const nextSettings = { ...settingsRef.current, activeStationId: sid };
+      await SettingsStore.saveSettings(nextSettings);
+      settingsRef.current = nextSettings;
+      systemIdRef.current = sid;
+      setSettings(nextSettings);
       setSystemId(sid);
       setIsLoggedIn(true);
     },
@@ -300,6 +343,13 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    systemIdRef.current = null;
+    Store.invalidateSession();
+    setIsLoggedIn(false);
+    setSystemId(null);
+    setIsFetching(false);
+    await modeQueue.current.catch(() => {});
+    await ForegroundServiceManager.stopService().catch(() => {});
     await Store.clearAll();
     await unregisterGeofence().catch(() => {});
     await disarmRemotePolling().catch(() => {});
@@ -318,13 +368,30 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const reloadHistory = useCallback(async () => {
-    const history = await loadOutageHistory();
+    const history = await loadOutageHistory(systemIdRef.current ?? undefined);
     setOutageHistory(history);
   }, []);
 
   const updateSettings = useCallback(async (newSettings: AppSettings) => {
-    setSettings(newSettings);
     await SettingsStore.saveSettings(newSettings);
+    if (JSON.stringify(settingsRef.current.homeZone) !== JSON.stringify(newSettings.homeZone)) {
+      await GeofenceStore.invalidateState();
+    }
+    const sid = newSettings.activeStationId;
+    if (sid && sid !== systemIdRef.current) {
+      await ForegroundServiceManager.stopService();
+      await Store.setSystemId(sid);
+      const history = await loadOutageHistory(sid);
+      await Store.removeOutageStartTime();
+      systemIdRef.current = sid;
+      setSystemId(sid);
+      setTelemetry(null);
+      setLastFetchTime(null);
+      setFetchError(null);
+      setOutageHistory(history);
+    }
+    settingsRef.current = newSettings;
+    setSettings(newSettings);
   }, []);
 
   // ─── Context value ────────────────────────────────────────────────────────
@@ -345,6 +412,7 @@ export function AppContextProvider({ children }: { children: ReactNode }) {
         outageHistory,
         reloadHistory,
         settings,
+        settingsLoaded,
         updateSettings,
         geofenceState,
         reloadGeofenceState,

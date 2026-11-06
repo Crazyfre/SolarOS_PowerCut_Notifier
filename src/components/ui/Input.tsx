@@ -45,7 +45,7 @@ export function Input({ label, unit, compactWidth, style, ...inputProps }: Input
             setFocused(false);
             inputProps.onBlur?.(e);
           }}
-          placeholderTextColor={colors.textDisabled}
+          placeholderTextColor={inputProps.placeholderTextColor ?? colors.textDisabled}
           style={[styles.input, { color: colors.textPrimary }]}
         />
         {unit ? (

@@ -30,9 +30,4 @@ export function withAlpha(hex: string, opacityPercent: number): string {
 
 // Static palette for non-React services (notification colors must match
 // the app's status hues; single source of truth).
-import { darkTheme } from './dark';
-export const serviceColors = {
-  brand: darkTheme.colors.brand,
-  success: darkTheme.colors.success,
-  danger: darkTheme.colors.danger,
-};
+export { serviceColors } from './serviceColors';

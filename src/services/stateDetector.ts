@@ -2,201 +2,178 @@ import { TelemetryData, OutageRecord, AppSettings } from '../types/telemetry';
 import { Store } from '../storage/secureStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  sendPowerCutNotification,
-  sendGridRestoredNotification,
-  sendBatteryLowNotification,
-  sendBatteryCriticalNotification,
-  sendOverSolarLoadNotification,
-  sendBatteryDischargingNotification,
+  sendPowerCutNotification, sendGridRestoredNotification,
+  sendBatteryLowNotification, sendBatteryCriticalNotification,
+  sendOverSolarLoadNotification, sendBatteryDischargingNotification, stopOutageAlarm,
 } from './notifications';
 import { DEFAULT_SETTINGS } from '../storage/settingsStore';
 import { DevOverridesStore } from '../storage/devOverridesStore';
 
 const OUTAGE_HISTORY_KEY = 'sg_outage_history';
-const LAST_BATTERY_STATUS_KEY = 'sg_last_battery_status';
-const LAST_OVER_SOLAR_TIME_KEY = 'sg_last_over_solar_time';
+let detectionQueue: Promise<void> = Promise.resolve();
 
-// Track within-session whether we've already sent low/critical warnings
-// to avoid repeated notifications during a single outage
-let lowNotificationSentForCurrentOutage = false;
-let criticalNotificationSentForCurrentOutage = false;
+interface DetectionState {
+  gridStatus?: 'on' | 'off';
+  outageStart?: number;
+  outageId?: string;
+  startBatterySoc?: number;
+  lowSent?: boolean;
+  criticalSent?: boolean;
+  batteryStatus?: string;
+  overSolarAt?: number;
+}
 
-/**
- * Load outage history from AsyncStorage.
- */
-export async function loadOutageHistory(): Promise<OutageRecord[]> {
+export async function loadOutageHistory(systemId?: string): Promise<OutageRecord[]> {
   try {
     const raw = await AsyncStorage.getItem(OUTAGE_HISTORY_KEY);
-    return raw ? (JSON.parse(raw) as OutageRecord[]) : [];
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((record): record is OutageRecord =>
+      !!record && typeof record.id === 'string' && Number.isFinite(record.startTime) &&
+      (!systemId || !record.systemId || record.systemId === systemId));
   } catch {
     return [];
   }
 }
 
-/**
- * Save outage history to AsyncStorage.
- */
-async function saveOutageHistory(history: OutageRecord[]): Promise<void> {
-  // Keep last 50 outages
-  const trimmed = history.slice(-50);
-  await AsyncStorage.setItem(OUTAGE_HISTORY_KEY, JSON.stringify(trimmed));
-}
+export interface DetectContext { remote?: boolean; }
 
-/**
- * Context describing where a detection run is executing from.
- * `remote: true` means the device is outside the home zone (or polling via
- * background-fetch): detection stays fully active, but the audible siren is
- * suppressed and alerts degrade to standard notifications.
- */
-export interface DetectContext {
-  remote?: boolean;
-}
-
-/**
- * Main detection function — called on every background fetch and foreground poll.
- * Respects user alert settings.
- */
-export async function detectAndAlert(
+/** Serialize UI, service and headless detections in this JS runtime. */
+export function detectAndAlert(
   telemetry: TelemetryData,
   settings: AppSettings = DEFAULT_SETTINGS,
-  context: DetectContext = {}
+  context: DetectContext = {},
 ): Promise<void> {
-  const currentStatus = telemetry.gridRelayStatus; // 'on' | 'off'
-  const lastStatus = await Store.getLastGridStatus();
+  const version = Store.getSessionVersion();
+  const pending = detectionQueue.then(async () => {
+    if (version !== Store.getSessionVersion()) return;
+    const activeSystem = await Store.getSystemId();
+    if (telemetry.systemId != null && activeSystem && String(telemetry.systemId) !== activeSystem) return;
+    await detect(telemetry, settings, context);
+  });
+  detectionQueue = pending.catch(() => {});
+  return pending;
+}
 
-  const overrides = await DevOverridesStore.getOverrides();
-  const isMocking = overrides.enabled;
-  const isRemote = context.remote === true;
+async function detect(telemetry: TelemetryData, settings: AppSettings, context: DetectContext): Promise<void> {
+  const version = Store.getSessionVersion();
+  const currentStatus = telemetry.gridRelayStatus;
+  if (currentStatus !== 'on' && currentStatus !== 'off') throw new Error('Invalid grid relay status');
+  const systemId = String(telemetry.systemId ?? await Store.getSystemId() ?? 'default');
+  const isMocking = (await DevOverridesStore.getOverrides()).enabled;
+  // Simulation must never change the real station's baseline or cooldowns.
+  const stateKey = `sg_detection_v2:${encodeURIComponent(systemId)}:${isMocking ? 'mock' : 'live'}`;
+  let state: DetectionState = {};
+  try {
+    const raw = await AsyncStorage.getItem(stateKey);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === 'object') state = parsed;
+  } catch { /* Recover a missing/corrupt baseline from the next observation. */ }
 
-  // ─── Grid status transition ────────────────────────────────────────────────
-
-  if (lastStatus === null) {
-    // First run — just record the state, no notification
-    await Store.setLastGridStatus(currentStatus);
-    return;
+  const history = isMocking ? [] : await loadOutageHistory();
+  let historyChanged = false;
+  // Recover an ongoing record after an upgrade without comparing two stations.
+  if (!state.gridStatus && !isMocking) {
+    const ongoing = [...history].reverse().find((r) => !r.endTime && (!r.systemId || r.systemId === systemId));
+    if (ongoing) {
+      state = { ...state, gridStatus: 'off', outageId: ongoing.id,
+        outageStart: ongoing.startTime, startBatterySoc: ongoing.startBatterySoc };
+    }
   }
+  const lastStatus = state.gridStatus;
+  const now = Date.now();
+  const soc = telemetry.batterySoc;
+  const load = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
+  const alerts: Array<() => Promise<void>> = [];
 
-  if (lastStatus === 'on' && currentStatus === 'off') {
-    // Grid just went down
-    const now = Date.now();
-    await Store.setOutageStartTime(now);
-    await Store.setLastGridStatus('off');
-
-    // Reset per-outage notification flags
-    lowNotificationSentForCurrentOutage = false;
-    criticalNotificationSentForCurrentOutage = false;
-
+  if (currentStatus === 'off' && lastStatus !== 'off') {
+    state.outageStart = now;
+    state.outageId = `outage_${systemId}_${now}`;
+    state.startBatterySoc = soc;
+    state.lowSent = false;
+    state.criticalSent = false;
     if (!isMocking) {
-      // Record outage start in history
-      const history = await loadOutageHistory();
-      const outage: OutageRecord = {
-        id: `outage_${now}`,
-        startTime: now,
-        maxLoadW: telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0),
-        minBatterySoc: telemetry.batterySoc,
-      };
-      history.push(outage);
-      await saveOutageHistory(history);
+      history.push({ id: state.outageId, systemId, startTime: now,
+        startBatterySoc: soc, minBatterySoc: soc, maxLoadW: load });
+      historyChanged = true;
     }
-
-    if (settings.alertOnPowerCut || settings.alertOnGridOffOnly) {
-      await sendPowerCutNotification(telemetry, settings, { remote: isRemote });
+    // First observation establishes a baseline; the outage may predate us.
+    if (lastStatus === 'on' && (settings.alertOnPowerCut || settings.alertOnGridOffOnly)) {
+      alerts.push(() => sendPowerCutNotification(telemetry, settings, context));
     }
-  } else if (lastStatus === 'off' && currentStatus === 'on') {
-    // Grid just came back
-    const startTime = await Store.getOutageStartTime();
-    const now = Date.now();
-    const durationMs = startTime ? now - startTime : 0;
-
-    await Store.setLastGridStatus('on');
-    await Store.removeOutageStartTime();
-
-    let socDrop = 0;
-    if (!isMocking) {
-      // Update outage record with end time
-      const history = await loadOutageHistory();
-      const last = history[history.length - 1];
-      if (last && !last.endTime) {
-        last.endTime = now;
-        last.durationMs = durationMs;
-        const startingSoc = last.minBatterySoc ?? 100;
-        socDrop = Math.max(0, startingSoc - (telemetry.batterySoc ?? 100));
-        await saveOutageHistory(history);
-      }
+  } else if (currentStatus === 'on' && lastStatus === 'off') {
+    const durationMs = Math.max(0, now - (state.outageStart ?? now));
+    const socDrop = state.startBatterySoc == null ? 0 : Math.max(0, state.startBatterySoc - soc);
+    const outage = history.find((r) => r.id === state.outageId && !r.endTime);
+    if (outage) {
+      outage.endTime = now;
+      outage.endBatterySoc = soc;
+      outage.durationMs = durationMs;
+      outage.minBatterySoc = Math.min(outage.minBatterySoc ?? soc, soc);
+      historyChanged = true;
     }
-
+    stopOutageAlarm();
     if (settings.alertOnPowerCut && !settings.alertOnGridOffOnly) {
-      await sendGridRestoredNotification(durationMs, telemetry.batterySoc ?? 0, settings, socDrop, { remote: isRemote });
+      alerts.push(() => sendGridRestoredNotification(durationMs, soc, settings, socDrop, context));
     }
+    delete state.outageStart;
+    delete state.outageId;
+    delete state.startBatterySoc;
+    state.lowSent = false;
+    state.criticalSent = false;
   }
-
-  // ─── Battery warnings during outage (Grid is OFF) ──────────────────────────
+  state.gridStatus = currentStatus;
 
   if (currentStatus === 'off') {
-    const soc = telemetry.batterySoc ?? 100;
-    const load = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
-
-    if (settings.alertOnBatteryPercent) {
-      const critThreshold = Math.min(10, settings.batteryWarningThreshold - 5);
-      if (soc <= critThreshold && !criticalNotificationSentForCurrentOutage) {
-        criticalNotificationSentForCurrentOutage = true;
-        await sendBatteryCriticalNotification(soc, settings, { remote: isRemote });
-      } else if (
-        soc <= settings.batteryWarningThreshold &&
-        !lowNotificationSentForCurrentOutage &&
-        !criticalNotificationSentForCurrentOutage
-      ) {
-        lowNotificationSentForCurrentOutage = true;
-        await sendBatteryLowNotification(soc, load, settings, { remote: isRemote });
+    if (settings.alertOnBatteryPercent && Number.isFinite(soc)) {
+      const criticalThreshold = Math.max(0, Math.min(10, settings.batteryWarningThreshold - 5));
+      if (soc <= criticalThreshold && !state.criticalSent) {
+        alerts.push(async () => {
+          await sendBatteryCriticalNotification(soc, settings, context);
+          state.criticalSent = true;
+        });
+      } else if (soc <= settings.batteryWarningThreshold && !state.lowSent && !state.criticalSent) {
+        alerts.push(async () => {
+          await sendBatteryLowNotification(soc, load, settings, context);
+          state.lowSent = true;
+        });
       }
     }
-
-    if (!isMocking) {
-      // Update running stats in history
-      const history = await loadOutageHistory();
-      const last = history[history.length - 1];
-      if (last && !last.endTime) {
-        if (last.minBatterySoc === undefined || soc < last.minBatterySoc) {
-          last.minBatterySoc = soc;
-        }
-        const currentLoad = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
-        if (last.maxLoadW === undefined || currentLoad > last.maxLoadW) {
-          last.maxLoadW = currentLoad;
-        }
-        await saveOutageHistory(history);
-      }
+    const outage = history.find((r) => r.id === state.outageId && !r.endTime);
+    if (outage) {
+      if (soc < (outage.minBatterySoc ?? Infinity)) { outage.minBatterySoc = soc; historyChanged = true; }
+      if (load > (outage.maxLoadW ?? -Infinity)) { outage.maxLoadW = load; historyChanged = true; }
     }
   }
 
-  // ─── Battery discharging alert (Grid is ON) ────────────────────────────────
+  if (lastStatus !== undefined && currentStatus === 'on' && settings.alertOnBatteryDischarge &&
+      telemetry.batteryStatus === 'DISCHARGE' && state.batteryStatus !== 'DISCHARGE') {
+    alerts.push(() => sendBatteryDischargingNotification(load, settings, context));
+  }
+  // Track this even during outages and while the alert is disabled.
+  state.batteryStatus = telemetry.batteryStatus;
 
-  if (currentStatus === 'on' && settings.alertOnBatteryDischarge) {
-    const currentBatStatus = telemetry.batteryStatus; // 'CHARGE' | 'DISCHARGE' | 'IDLE'
-    const lastBatStatus = await AsyncStorage.getItem(LAST_BATTERY_STATUS_KEY);
-
-    if (currentBatStatus === 'DISCHARGE' && lastBatStatus !== 'DISCHARGE') {
-      const load = telemetry.usePower ?? Math.abs(telemetry.batteryPower ?? 0);
-      await sendBatteryDischargingNotification(load, settings, { remote: isRemote });
-    }
-    await AsyncStorage.setItem(LAST_BATTERY_STATUS_KEY, currentBatStatus);
+  if (currentStatus === 'on' && settings.alertOnOverSolarLoad &&
+      (telemetry.pvPower ?? 0) > 0 && load > (telemetry.pvPower ?? 0) &&
+      now - (state.overSolarAt ?? 0) >= 30 * 60 * 1000) {
+    alerts.push(async () => {
+      await sendOverSolarLoadNotification(load, telemetry.pvPower!, settings, context);
+      state.overSolarAt = now;
+    });
   }
 
-  // ─── Over Solar Load alert (Grid is ON) ────────────────────────────────────
+  if (historyChanged) await AsyncStorage.setItem(OUTAGE_HISTORY_KEY, JSON.stringify(history.slice(-50)));
+  // Commit the transition before delivery so a permission failure cannot
+  // discard history or make concurrent pollers report the same grid event.
+  await AsyncStorage.setItem(stateKey, JSON.stringify(state));
+  await Store.setLastGridStatus(currentStatus);
+  if (state.outageStart != null) await Store.setOutageStartTime(state.outageStart);
+  else await Store.removeOutageStartTime();
 
-  if (settings.alertOnOverSolarLoad) {
-    const pvPower = telemetry.pvPower ?? 0;
-    const usePower = telemetry.usePower ?? 0;
-
-    if (pvPower > 0 && usePower > pvPower) {
-      const now = Date.now();
-      const rawLastTime = await AsyncStorage.getItem(LAST_OVER_SOLAR_TIME_KEY);
-      const lastTime = rawLastTime ? parseInt(rawLastTime, 10) : 0;
-      const cooldownMs = 30 * 60 * 1000; // 30-minute cooldown to avoid spamming alerts
-
-      if (now - lastTime > cooldownMs) {
-        await AsyncStorage.setItem(LAST_OVER_SOLAR_TIME_KEY, String(now));
-        await sendOverSolarLoadNotification(usePower, pvPower, settings, { remote: isRemote });
-      }
-    }
+  for (const alert of alerts) {
+    if (version !== Store.getSessionVersion()) return;
+    try { await alert(); }
+    catch (error) { console.warn('[StateDetector] Alert delivery failed:', error); }
   }
+  await AsyncStorage.setItem(stateKey, JSON.stringify(state));
 }

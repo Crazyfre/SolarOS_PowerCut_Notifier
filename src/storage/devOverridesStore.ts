@@ -23,7 +23,9 @@ export const DevOverridesStore = {
   async getOverrides(): Promise<DevOverrides> {
     try {
       const raw = await AsyncStorage.getItem(OVERRIDES_KEY);
-      return raw ? JSON.parse(raw) : { enabled: false };
+      const parsed = raw ? JSON.parse(raw) : null;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? { ...parsed, enabled: parsed.enabled === true } : { enabled: false };
     } catch (error) {
       console.error('[DevOverridesStore] Failed to load overrides:', error);
       return { enabled: false };
@@ -37,7 +39,7 @@ export const DevOverridesStore = {
     try {
       await AsyncStorage.setItem(OVERRIDES_KEY, JSON.stringify(overrides));
     } catch (error) {
-      console.error('[DevOverridesStore] Failed to save overrides:', error);
+      throw error;
     }
   },
 };

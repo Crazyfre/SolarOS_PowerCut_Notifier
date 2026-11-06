@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useTheme, Typography, Spacing, PAGE_GUTTER } from '../theme';
 import { useApp } from '../context/AppContext';
+import { TabSwipeRegion } from '../components/TabSwipeRegion';
 import {
   ScreenHeader,
   SectionHeader,
@@ -18,7 +19,7 @@ import {
   BatteryCharging,
   Battery,
   PiggyBank,
-} from 'lucide-react-native';
+} from '../components/icons';
 import { ReportGenerator } from '../services/reportGenerator';
 import { FinancialEngine } from '../services/financialEngine';
 
@@ -196,92 +197,94 @@ export function AnalyticsScreen() {
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <ScreenHeader title="Analytics" subtitle="Energy generation & usage insights" />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Savings hero — KSEB slab counterfactual */}
-        {savings ? (
-          <Card style={styles.savingsCard}>
-            <View style={styles.savingsHeader}>
-              <PiggyBank size={16} color={colors.successText} strokeWidth={2} />
-              <Text style={[styles.savingsLabel, { color: colors.textSecondary }]}>
-                Estimated Savings
-              </Text>
-              {savings.today.estimatedAtRate ? (
-                <Text style={[styles.savingsEstimate, { color: colors.textSecondary }]}>
-                  · est. @ ₹{savings.today.estimatedAtRate.toFixed(2)}/unit
+      <TabSwipeRegion>
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+          {/* Savings hero — KSEB slab counterfactual */}
+          {savings ? (
+            <Card style={styles.savingsCard}>
+              <View style={styles.savingsHeader}>
+                <PiggyBank size={16} color={colors.successText} strokeWidth={2} />
+                <Text style={[styles.savingsLabel, { color: colors.textSecondary }]}>
+                  Estimated Savings
+                </Text>
+                {savings.today.estimatedAtRate ? (
+                  <Text style={[styles.savingsEstimate, { color: colors.textSecondary }]}>
+                    · est. @ ₹{savings.today.estimatedAtRate.toFixed(2)}/unit
+                  </Text>
+                ) : null}
+              </View>
+              <View style={styles.savingsRow}>
+                <View style={styles.savingsCol}>
+                  <Text style={[styles.savingsValue, { color: colors.textPrimary }]}>
+                    ₹{savings.today.savings.toFixed(0)}
+                  </Text>
+                  <Text style={[styles.savingsSub, { color: colors.textSecondary }]}>Today</Text>
+                </View>
+                <View style={styles.savingsDivider} />
+                <View style={styles.savingsCol}>
+                  <Text style={[styles.savingsValue, { color: colors.textPrimary }]}>
+                    ₹{savings.monthly.savings.toFixed(0)}
+                  </Text>
+                  <Text style={[styles.savingsSub, { color: colors.textSecondary }]}>This Month</Text>
+                </View>
+                <View style={styles.savingsDivider} />
+                <View style={styles.savingsCol}>
+                  <Text style={[styles.savingsValue, { color: colors.textPrimary }]}>
+                    ₹{savings.lifetime.savings.toFixed(0)}
+                  </Text>
+                  <Text style={[styles.savingsSub, { color: colors.textSecondary }]}>Lifetime</Text>
+                </View>
+              </View>
+              {savings.bankedSurplusUnits > 0 ? (
+                <Text style={[styles.bankedText, { color: colors.textSecondary }]}>
+                  {savings.bankedSurplusUnits} units banked this month — settles 31 Mar at ~₹
+                  {(savings.bankedSurplusValue / Math.max(savings.bankedSurplusUnits, 0.01)).toFixed(2)}/unit (APPC)
                 </Text>
               ) : null}
-            </View>
-            <View style={styles.savingsRow}>
-              <View style={styles.savingsCol}>
-                <Text style={[styles.savingsValue, { color: colors.textPrimary }]}>
-                  ₹{savings.today.savings.toFixed(0)}
+              {savings.cliff.keptUnderCliff && savings.cliff.distanceToCliff >= 0 ? (
+                <Text style={[styles.bankedText, { color: colors.successText }]}>
+                  Solar kept this month under the 250-unit cliff — {savings.cliff.distanceToCliff} unit{savings.cliff.distanceToCliff === 1 ? '' : 's'} to go (crossing it adds ≈₹{savings.cliff.jump.toFixed(0)}).
                 </Text>
-                <Text style={[styles.savingsSub, { color: colors.textSecondary }]}>Today</Text>
-              </View>
-              <View style={styles.savingsDivider} />
-              <View style={styles.savingsCol}>
-                <Text style={[styles.savingsValue, { color: colors.textPrimary }]}>
-                  ₹{savings.monthly.savings.toFixed(0)}
-                </Text>
-                <Text style={[styles.savingsSub, { color: colors.textSecondary }]}>This Month</Text>
-              </View>
-              <View style={styles.savingsDivider} />
-              <View style={styles.savingsCol}>
-                <Text style={[styles.savingsValue, { color: colors.textPrimary }]}>
-                  ₹{savings.lifetime.savings.toFixed(0)}
-                </Text>
-                <Text style={[styles.savingsSub, { color: colors.textSecondary }]}>Lifetime</Text>
-              </View>
-            </View>
-            {savings.bankedSurplusUnits > 0 ? (
-              <Text style={[styles.bankedText, { color: colors.textSecondary }]}>
-                {savings.bankedSurplusUnits} units banked this month — settles 31 Mar at ~₹
-                {(savings.bankedSurplusValue / Math.max(savings.bankedSurplusUnits, 0.01)).toFixed(2)}/unit (APPC)
-              </Text>
-            ) : null}
-            {savings.cliff.keptUnderCliff && savings.cliff.distanceToCliff >= 0 ? (
-              <Text style={[styles.bankedText, { color: colors.successText }]}>
-                Solar kept this month under the 250-unit cliff — {savings.cliff.distanceToCliff} unit{savings.cliff.distanceToCliff === 1 ? '' : 's'} to go (crossing it adds ≈₹{savings.cliff.jump.toFixed(0)}).
-              </Text>
-            ) : null}
-          </Card>
-        ) : null}
+              ) : null}
+            </Card>
+          ) : null}
 
-        <SectionHeader title="Reports" />
-        <Button
-          label={isGenerating ? 'Compiling Report…' : 'Download Monthly Report'}
-          onPress={handleDownloadReport}
-          disabled={isGenerating}
-          loading={isGenerating}
-          icon={!isGenerating ? <Download size={16} color={colors.textInverse} strokeWidth={2} /> : undefined}
-          full
-        />
+          <SectionHeader title="Reports" />
+          <Button
+            label={isGenerating ? 'Compiling Report…' : 'Download Monthly Report'}
+            onPress={handleDownloadReport}
+            disabled={isGenerating || !telemetry}
+            loading={isGenerating}
+            icon={!isGenerating ? <Download size={16} color={colors.textInverse} strokeWidth={2} /> : undefined}
+            full
+          />
 
-        <View style={styles.accordions}>
-          <Accordion title="Today's Statistics" expanded={todayExpanded} onToggle={() => setTodayExpanded(!todayExpanded)}>
-            {metricGrid(todayMetrics)}
-          </Accordion>
+          <View style={styles.accordions}>
+            <Accordion title="Today's Statistics" expanded={todayExpanded} onToggle={() => setTodayExpanded(!todayExpanded)}>
+              {metricGrid(todayMetrics)}
+            </Accordion>
 
-          <Accordion title="Monthly Summary" expanded={monthlyExpanded} onToggle={() => setMonthlyExpanded(!monthlyExpanded)}>
-            {metricGrid(monthlyMetrics)}
-          </Accordion>
+            <Accordion title="Monthly Summary" expanded={monthlyExpanded} onToggle={() => setMonthlyExpanded(!monthlyExpanded)}>
+              {metricGrid(monthlyMetrics)}
+            </Accordion>
 
-          <Accordion title="Lifetime Statistics" expanded={lifetimeExpanded} onToggle={() => setLifetimeExpanded(!lifetimeExpanded)}>
-            {metricGrid(lifetimeMetrics)}
-          </Accordion>
-        </View>
-
-        {!telemetry ? (
-          <View style={styles.emptyState}>
-            <ActivityIndicator color={colors.brand} size="large" />
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              Waiting for telemetry data…
-            </Text>
+            <Accordion title="Lifetime Statistics" expanded={lifetimeExpanded} onToggle={() => setLifetimeExpanded(!lifetimeExpanded)}>
+              {metricGrid(lifetimeMetrics)}
+            </Accordion>
           </View>
-        ) : null}
 
-        <View style={{ height: Spacing['3xl'] }} />
-      </ScrollView>
+          {!telemetry ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator color={colors.brand} size="large" />
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                Waiting for telemetry data…
+              </Text>
+            </View>
+          ) : null}
+
+          <View style={{ height: Spacing['3xl'] }} />
+        </ScrollView>
+      </TabSwipeRegion>
     </View>
   );
 }

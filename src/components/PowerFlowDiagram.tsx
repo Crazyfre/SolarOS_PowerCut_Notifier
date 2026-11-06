@@ -28,7 +28,7 @@ import {
   BatteryWarning,
   BatteryCharging,
   House,
-} from 'lucide-react-native';
+} from './icons';
 
 interface PowerFlowProps {
   gridOn: boolean;

@@ -19,7 +19,13 @@ export const MAX_ZONE_RADIUS_METERS = 2000;
 export { armRemotePolling, disarmRemotePolling };
 export { REMOTE_POLL_MIN_INTERVAL_MINUTES, GEOFENCE_REMOTE_POLL_TASK };
 
-let fenceRegistrationInFlight: Promise<boolean> | null = null;
+let fenceOperations: Promise<void> = Promise.resolve();
+
+function serializeFence<T>(action: () => Promise<T>): Promise<T> {
+  const pending = fenceOperations.then(action);
+  fenceOperations = pending.then(() => {}, () => {});
+  return pending;
+}
 
 /**
  * Request foreground location permission (step 1 of the two-step flow).
@@ -72,7 +78,7 @@ export async function getCurrentLocation(): Promise<{ lat: number; lng: number }
  * Validate + normalize a home zone. Returns null when invalid.
  */
 export function normalizeZone(lat: number, lng: number, radius: number): HomeZone | null {
-  if (!isFinite(lat) || !isFinite(lng)) return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(radius)) return null;
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
   const radiusMeters = Math.min(
     MAX_ZONE_RADIUS_METERS,
@@ -89,47 +95,40 @@ export function normalizeZone(lat: number, lng: number, radius: number): HomeZon
  */
 export async function registerGeofence(zone: HomeZone): Promise<boolean> {
   if (Platform.OS !== 'android') return false;
-  const { background } = await getLocationPermissions();
-  if (!background) {
-    console.warn('[GeofenceService] Background location not granted — fence not armed.');
-    return false;
-  }
-  if (fenceRegistrationInFlight) return fenceRegistrationInFlight;
-
-  fenceRegistrationInFlight = (async () => {
-    try {
-      await Location.startGeofencingAsync(GEOFENCE_TASK, [
-        {
-          identifier: 'solarguard_home_zone',
-          latitude: zone.lat,
-          longitude: zone.lng,
-          radius: zone.radiusMeters,
-          notifyOnEnter: true,
-          notifyOnExit: true,
-        },
-      ]);
-      await GeofenceStore.setState({ registeredAt: Date.now() });
-      console.log('[GeofenceService] Fence armed:', zone);
-      return true;
-    } catch (error) {
-      console.warn('[GeofenceService] Failed to arm fence:', error);
-      return false;
-    } finally {
-      fenceRegistrationInFlight = null;
-    }
-  })();
-
-  return fenceRegistrationInFlight;
+  return serializeFence(async () => {
+      try {
+        const { background } = await getLocationPermissions();
+        if (!background) return false;
+        await Location.startGeofencingAsync(GEOFENCE_TASK, [
+          {
+            identifier: 'solarguard_home_zone',
+            latitude: zone.lat,
+            longitude: zone.lng,
+            radius: zone.radiusMeters,
+            notifyOnEnter: true,
+            notifyOnExit: true,
+          },
+        ]);
+        await GeofenceStore.setState({ registeredAt: Date.now() });
+        console.log('[GeofenceService] Fence armed:', zone);
+        return true;
+      } catch (error) {
+        console.warn('[GeofenceService] Failed to arm fence:', error);
+        return false;
+      }
+  });
 }
 
 export async function unregisterGeofence(): Promise<void> {
-  try {
-    const has = await Location.hasStartedGeofencingAsync(GEOFENCE_TASK);
-    if (has) await Location.stopGeofencingAsync(GEOFENCE_TASK);
-  } catch (error) {
-    console.warn('[GeofenceService] Failed to disarm fence:', error);
-  }
-  await GeofenceStore.setState({ registeredAt: null });
+  return serializeFence(async () => {
+    try {
+      const has = await Location.hasStartedGeofencingAsync(GEOFENCE_TASK);
+      if (has) await Location.stopGeofencingAsync(GEOFENCE_TASK);
+    } catch (error) {
+      console.warn('[GeofenceService] Failed to disarm fence:', error);
+    }
+    await GeofenceStore.setState({ registeredAt: null });
+  });
 }
 
 export async function isGeofenceRegistered(): Promise<boolean> {
@@ -188,11 +187,16 @@ export async function verifyInsideZone(
       const { lat, lng } = overrides.mockPosition;
       return isInsideZone(zone, lat, lng);
     }
-    const pos = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
-      timeInterval: 1000,
-    });
-    return isInsideZone(zone, pos.coords.latitude, pos.coords.longitude);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const pos = await Promise.race([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        new Promise<null>((resolve) => { timeout = setTimeout(() => resolve(null), 8000); }),
+      ]);
+      return pos ? isInsideZone(zone, pos.coords.latitude, pos.coords.longitude) : null;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
   } catch {
     return null;
   }

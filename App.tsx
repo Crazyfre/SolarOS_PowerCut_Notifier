@@ -2,10 +2,9 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
-import { Text, View, StyleSheet, ActivityIndicator, Platform, Dimensions } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useNavigation } from '@react-navigation/native';
+import { Text, View, StyleSheet, ActivityIndicator, Platform, useWindowDimensions } from 'react-native';
+import { SafeAreaProvider, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFonts } from 'expo-font';
 
 import { AppContextProvider, useApp } from './src/context/AppContext';
@@ -16,119 +15,75 @@ import { HistoryScreen } from './src/screens/HistoryScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { AnalyticsScreen } from './src/screens/AnalyticsScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
-import { LayoutDashboard, History, ChartColumn, SunMedium } from 'lucide-react-native';
+import { LayoutDashboard, History, ChartColumn, SunMedium } from './src/components/icons';
+import { getTabBarLayout, MAIN_TAB_OPTIONS, MainTabParamList } from './src/navigation/tabNavigation';
 
 // Import background task definitions so they register at module load
 import './src/services/foregroundService';
 // Headless geofence ENTER/EXIT + remote background-fetch poll task definitions
 import './src/services/geofenceTasks';
 
-const Tab = createBottomTabNavigator();
+const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createStackNavigator();
 
-const tabNames = ['Dashboard', 'History', 'Analytics'];
-
-const getActiveRouteName = (navState: any): string => {
-  if (!navState) return 'Dashboard';
-  const route = navState.routes[navState.index];
-  if (route.state) {
-    return getActiveRouteName(route.state);
-  }
-  return route.name;
-};
-
-const screenHeight = Dimensions.get('window').height;
-const headerHeight = 90; // Ignore swipes in top 90px header
-const footerHeight = 90; // Ignore swipes in bottom 90px tab bar
-
 function MainTabs() {
-  const navigation = useNavigation<any>();
   const { colors } = useTheme();
-
-  const swipeGesture = Gesture.Pan()
-    .runOnJS(true)
-    .activeOffsetX([-20, 20])
-    .failOffsetY([-20, 20])
-    .onEnd((event) => {
-      // Ignore top header and bottom footer
-      if (event.y < headerHeight || event.y > screenHeight - footerHeight) {
-        return;
-      }
-
-      const threshold = 60; // minimum translation to switch tabs
-      if (event.translationX > threshold) {
-        const state = navigation.getState();
-        const activeName = getActiveRouteName(state);
-        const idx = tabNames.indexOf(activeName);
-        if (idx > 0) {
-          navigation.navigate('MainTabs', { screen: tabNames[idx - 1] });
-        }
-      } else if (event.translationX < -threshold) {
-        const state = navigation.getState();
-        const activeName = getActiveRouteName(state);
-        const idx = tabNames.indexOf(activeName);
-        if (idx !== -1 && idx < tabNames.length - 1) {
-          navigation.navigate('MainTabs', { screen: tabNames[idx + 1] });
-        }
-      }
-    });
+  const insets = useSafeAreaInsets();
+  const { fontScale } = useWindowDimensions();
 
   return (
-    <GestureDetector gesture={swipeGesture}>
-      <View style={{ flex: 1 }}>
-        <Tab.Navigator
-          screenOptions={{
-            headerShown: false,
-            tabBarStyle: [styles.tabBar, { backgroundColor: colors.background, borderTopColor: colors.divider }],
-            tabBarActiveTintColor: colors.brand,
-            tabBarInactiveTintColor: colors.textDisabled,
-            tabBarShowLabel: true,
-            tabBarLabelStyle: styles.tabBarLabel,
-            freezeOnBlur: true,
-          }}
-        >
-          <Tab.Screen
-            name="Dashboard"
-            component={DashboardScreen}
-            options={{
-              tabBarIcon: ({ focused }) => (
-                <View style={styles.tabIconWrap}>
-                  {focused && <View style={[styles.tabIndicator, { backgroundColor: colors.brand }]} />}
-                  <LayoutDashboard size={20} color={focused ? colors.brand : colors.textDisabled} />
-                </View>
-              ),
-              tabBarLabel: 'Dashboard',
-            }}
-          />
-          <Tab.Screen
-            name="History"
-            component={HistoryScreen}
-            options={{
-              tabBarIcon: ({ focused }) => (
-                <View style={styles.tabIconWrap}>
-                  {focused && <View style={[styles.tabIndicator, { backgroundColor: colors.brand }]} />}
-                  <History size={20} color={focused ? colors.brand : colors.textDisabled} />
-                </View>
-              ),
-              tabBarLabel: 'History',
-            }}
-          />
-          <Tab.Screen
-            name="Analytics"
-            component={AnalyticsScreen}
-            options={{
-              tabBarIcon: ({ focused }) => (
-                <View style={styles.tabIconWrap}>
-                  {focused && <View style={[styles.tabIndicator, { backgroundColor: colors.brand }]} />}
-                  <ChartColumn size={20} color={focused ? colors.brand : colors.textDisabled} />
-                </View>
-              ),
-              tabBarLabel: 'Analytics',
-            }}
-          />
-        </Tab.Navigator>
-      </View>
-    </GestureDetector>
+    <Tab.Navigator
+      {...MAIN_TAB_OPTIONS}
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: [styles.tabBar, getTabBarLayout(insets.bottom, fontScale), { backgroundColor: colors.background, borderTopColor: colors.divider }],
+        tabBarActiveTintColor: colors.brand,
+        tabBarInactiveTintColor: colors.textDisabled,
+        tabBarShowLabel: true,
+        tabBarLabelStyle: styles.tabBarLabel,
+        freezeOnBlur: true,
+      }}
+    >
+      <Tab.Screen
+        name="Dashboard"
+        component={DashboardScreen}
+        options={{
+          tabBarIcon: ({ focused }) => (
+            <View style={styles.tabIconWrap}>
+              {focused && <View style={[styles.tabIndicator, { backgroundColor: colors.brand }]} />}
+              <LayoutDashboard size={20} color={focused ? colors.brand : colors.textDisabled} />
+            </View>
+          ),
+          tabBarLabel: 'Dashboard',
+        }}
+      />
+      <Tab.Screen
+        name="History"
+        component={HistoryScreen}
+        options={{
+          tabBarIcon: ({ focused }) => (
+            <View style={styles.tabIconWrap}>
+              {focused && <View style={[styles.tabIndicator, { backgroundColor: colors.brand }]} />}
+              <History size={20} color={focused ? colors.brand : colors.textDisabled} />
+            </View>
+          ),
+          tabBarLabel: 'History',
+        }}
+      />
+      <Tab.Screen
+        name="Analytics"
+        component={AnalyticsScreen}
+        options={{
+          tabBarIcon: ({ focused }) => (
+            <View style={styles.tabIconWrap}>
+              {focused && <View style={[styles.tabIndicator, { backgroundColor: colors.brand }]} />}
+              <ChartColumn size={20} color={focused ? colors.brand : colors.textDisabled} />
+            </View>
+          ),
+          tabBarLabel: 'Analytics',
+        }}
+      />
+    </Tab.Navigator>
   );
 }
 
@@ -185,10 +140,10 @@ function AppNavigator() {
 }
 
 export default function App() {
-  // Fonts gate the whole tree — no silent system-font fallbacks
-  const [fontsLoaded] = useFonts(FontResources);
+  // Load bundled fonts first; a font failure must not block startup.
+  const [fontsLoaded, fontError] = useFonts(FontResources);
 
-  if (!fontsLoaded) {
+  if (!fontsLoaded && !fontError) {
     return (
       <View style={styles.splashContainer}>
         <SunMedium size={72} color="#F5A623" style={{ marginBottom: 16 }} />
@@ -200,7 +155,7 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
+      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <AppContextProvider>
           <ThemeProvider>
             <AppNavigator />
@@ -227,8 +182,6 @@ const styles = StyleSheet.create({
   tabBar: {
     borderTopWidth: 1,
     paddingTop: 8,
-    height: 60,
-    paddingBottom: Platform.OS === 'ios' ? 12 : 8,
   },
   tabBarLabel: {
     fontFamily: Typography.fontFamily.medium,

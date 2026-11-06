@@ -59,6 +59,9 @@ export interface TelemetryData {
 
 export interface OutageRecord {
   id: string;
+  systemId?: string;
+  startBatterySoc?: number;
+  endBatterySoc?: number;
   startTime: number;        // Unix ms
   endTime?: number;         // Unix ms (undefined = still ongoing)
   durationMs?: number;      // ms

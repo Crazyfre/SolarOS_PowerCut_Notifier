@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useTheme, Typography, Spacing, PAGE_GUTTER } from '../theme';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { loginWithPassword } from '../api/auth';
 import { fetchStations } from '../api/solar';
 import { useApp } from '../context/AppContext';
@@ -25,7 +26,7 @@ import {
   House,
   Building2,
   Check,
-} from 'lucide-react-native';
+} from '../components/icons';
 
 interface Station {
   id: string;
@@ -61,10 +62,19 @@ export function LoginScreen() {
     stationId: string
   ) => {
     setShowPicker(false);
+    setIsLoading(true);
     setLoadingStep('Setting up…');
-
-    await requestNotificationPermissions();
-    await login(tokens, stationId, email.trim());
+    try {
+      // Permission setup is optional; a platform failure must not prevent login.
+      await requestNotificationPermissions().catch((err) => console.warn('Notification setup unavailable:', err));
+      await login(tokens, stationId, email.trim());
+      setPendingTokens(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to complete sign in. Please try again.');
+    } finally {
+      setIsLoading(false);
+      setLoadingStep('');
+    }
   };
 
   // ─── Main login handler ──────────────────────────────────────────────────
@@ -126,6 +136,7 @@ export function LoginScreen() {
   };
 
   const sheetRows: SheetRowProps[] = pendingStations.map((s) => ({
+    id: s.id,
     title: s.name,
     subtitle: `ID: ${s.id}`,
     icon: stationIcon(s.name),
@@ -136,127 +147,129 @@ export function LoginScreen() {
 
   return (
     <>
-      <KeyboardAvoidingView
-        style={[styles.root, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+      <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]}>
+        <KeyboardAvoidingView
+          style={[styles.root, { backgroundColor: colors.background }]}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
-          {/* Logo / Header */}
-          <View style={styles.heroSection}>
-            <View style={styles.logoContainer}>
-              <View style={[styles.logoGlow, { backgroundColor: 'rgba(245,166,35,0.14)' }]} />
-              <SunMedium size={64} color={colors.brand} strokeWidth={1.8} />
-            </View>
-            <Text style={[styles.appName, { color: colors.textPrimary }]}>SolarGuard</Text>
-            <Text style={[styles.tagline, { color: colors.textSecondary }]}>
-              Solar Power Cut Detection & Monitoring
-            </Text>
-          </View>
-
-          {/* Login Card */}
-          <View
-            style={[
-              styles.card,
-              { backgroundColor: colors.surface1, borderColor: colors.border },
-            ]}
+          <ScrollView
+            contentContainerStyle={styles.scroll}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
           >
-            <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Connect to SolarOS</Text>
-            <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
-              Sign in with your SolarOS account credentials
-            </Text>
-
-            <Input
-              label="Email Address"
-              value={email}
-              onChangeText={setEmail}
-              placeholder="you@example.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!isLoading}
-              accessibilityLabel="Email address input"
-              testID="email-input"
-              style={{ marginBottom: Spacing.base }}
-            />
-
-            <Input
-              label="Password"
-              value={password}
-              onChangeText={setPassword}
-              placeholder="••••••••"
-              placeholderTextColor={colors.textDisabled}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!isLoading}
-              accessibilityLabel="Password input"
-              testID="password-input"
-            />
-
-            {/* Error */}
-            {error ? (
-              <View
-                style={[
-                  styles.errorBox,
-                  { backgroundColor: colors.dangerFill, borderColor: colors.dangerBorder },
-                ]}
-              >
-                <TriangleAlert size={16} color={colors.dangerText} strokeWidth={2} />
-                <Text style={[styles.errorText, { color: colors.dangerText }]}>{error}</Text>
+            {/* Logo / Header */}
+            <View style={styles.heroSection}>
+              <View style={styles.logoContainer}>
+                <View style={[styles.logoGlow, { backgroundColor: 'rgba(245,166,35,0.14)' }]} />
+                <SunMedium size={64} color={colors.brand} strokeWidth={1.8} />
               </View>
-            ) : null}
-
-            {/* Connect button */}
-            {isLoading ? (
-              <View style={styles.loadingRow}>
-                <ActivityIndicator color={colors.brand} size="small" />
-                <Text style={[styles.loadingStep, { color: colors.textSecondary }]}>{loadingStep}</Text>
-              </View>
-            ) : (
-              <Button
-                label="Connect"
-                onPress={handleLogin}
-                icon={<Zap size={16} color={colors.textInverse} strokeWidth={2} />}
-                full
-                accessibilityLabel="Connect to SolarOS"
-                testID="login-button"
-              />
-            )}
-
-            <View style={styles.securityRow}>
-              <Lock size={11} color={colors.textDisabled} strokeWidth={2} />
-              <Text style={[styles.securityNote, { color: colors.textDisabled }]}>
-                Password is SHA-256 hashed before transmission and never stored.
+              <Text style={[styles.appName, { color: colors.textPrimary }]}>SolarGuard</Text>
+              <Text style={[styles.tagline, { color: colors.textSecondary }]}>
+                Solar Power Cut Detection & Monitoring
               </Text>
             </View>
-          </View>
 
-          {/* Feature pills */}
-          <View style={styles.features}>
-            {[
-              { text: 'Outage Alerts', icon: <TriangleAlert size={13} color={colors.brandBright} strokeWidth={2} /> },
-              { text: 'Battery Monitor', icon: <Battery size={13} color={colors.brandBright} strokeWidth={2} /> },
-              { text: 'Usage Insights', icon: <ChartColumn size={13} color={colors.brandBright} strokeWidth={2} /> },
-              { text: 'Instant Push', icon: <Bell size={13} color={colors.brandBright} strokeWidth={2} /> },
-            ].map((f) => (
-              <View
-                key={f.text}
-                style={[
-                  styles.featurePill,
-                  { backgroundColor: colors.glassFill, borderColor: colors.border },
-                ]}
-              >
-                {f.icon}
-                <Text style={[styles.featurePillText, { color: colors.textSecondary }]}>{f.text}</Text>
+            {/* Login Card */}
+            <View
+              style={[
+                styles.card,
+                { backgroundColor: colors.surface1, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Connect to SolarOS</Text>
+              <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+                Sign in with your SolarOS account credentials
+              </Text>
+
+              <Input
+                label="Email Address"
+                value={email}
+                onChangeText={setEmail}
+                placeholder="you@example.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!isLoading}
+                accessibilityLabel="Email address input"
+                testID="email-input"
+                style={{ marginBottom: Spacing.base }}
+              />
+
+              <Input
+                label="Password"
+                value={password}
+                onChangeText={setPassword}
+                placeholder="••••••••"
+                placeholderTextColor={colors.textDisabled}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!isLoading}
+                accessibilityLabel="Password input"
+                testID="password-input"
+              />
+
+              {/* Error */}
+              {error ? (
+                <View
+                  style={[
+                    styles.errorBox,
+                    { backgroundColor: colors.dangerFill, borderColor: colors.dangerBorder },
+                  ]}
+                >
+                  <TriangleAlert size={16} color={colors.dangerText} strokeWidth={2} />
+                  <Text style={[styles.errorText, { color: colors.dangerText }]}>{error}</Text>
+                </View>
+              ) : null}
+
+              {/* Connect button */}
+              {isLoading ? (
+                <View style={styles.loadingRow}>
+                  <ActivityIndicator color={colors.brand} size="small" />
+                  <Text style={[styles.loadingStep, { color: colors.textSecondary }]}>{loadingStep}</Text>
+                </View>
+              ) : (
+                <Button
+                  label="Connect"
+                  onPress={handleLogin}
+                  icon={<Zap size={16} color={colors.textInverse} strokeWidth={2} />}
+                  full
+                  accessibilityLabel="Connect to SolarOS"
+                  testID="login-button"
+                />
+              )}
+
+              <View style={styles.securityRow}>
+                <Lock size={11} color={colors.textDisabled} strokeWidth={2} />
+                <Text style={[styles.securityNote, { color: colors.textDisabled }]}>
+                  Password is SHA-256 hashed before transmission and never stored.
+                </Text>
               </View>
-            ))}
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+            </View>
+
+            {/* Feature pills */}
+            <View style={styles.features}>
+              {[
+                { text: 'Outage Alerts', icon: <TriangleAlert size={13} color={colors.brandBright} strokeWidth={2} /> },
+                { text: 'Battery Monitor', icon: <Battery size={13} color={colors.brandBright} strokeWidth={2} /> },
+                { text: 'Usage Insights', icon: <ChartColumn size={13} color={colors.brandBright} strokeWidth={2} /> },
+                { text: 'Instant Push', icon: <Bell size={13} color={colors.brandBright} strokeWidth={2} /> },
+              ].map((f) => (
+                <View
+                  key={f.text}
+                  style={[
+                    styles.featurePill,
+                    { backgroundColor: colors.glassFill, borderColor: colors.border },
+                  ]}
+                >
+                  {f.icon}
+                  <Text style={[styles.featurePillText, { color: colors.textSecondary }]}>{f.text}</Text>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
 
       {/* Station picker sheet */}
       {showPicker && pendingTokens ? (

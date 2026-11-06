@@ -4,6 +4,7 @@ import { StorageService } from './storageService';
 import { TelemetryData } from '../types/telemetry';
 import { GeofenceStore } from '../storage/geofenceStore';
 import { SettingsStore } from '../storage/settingsStore';
+import { resolveEffectiveMode } from './geofenceService';
 
 let cachedTelemetry: TelemetryData | null = null;
 let lastFetchTime: number | null = null;
@@ -19,6 +20,7 @@ export const MonitoringService = {
       const remote =
         settings.monitoringMode === 'geofenced' &&
         !!settings.homeZone &&
+        await resolveEffectiveMode(settings) === 'geofenced' &&
         (await GeofenceStore.getState()).inside === false;
       await detectAndAlert(data, settings, { remote });
 

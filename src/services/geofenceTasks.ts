@@ -23,7 +23,9 @@ export async function pollOnce(remote: boolean): Promise<void> {
   if (!systemId) return;
 
   const settings = await SettingsStore.loadSettings();
+  const version = Store.getSessionVersion();
   const telemetry = await fetchTelemetry(systemId);
+  if (version !== Store.getSessionVersion() || systemId !== await Store.getSystemId()) return;
   await detectAndAlert(telemetry, settings, { remote });
 }
 
@@ -43,9 +45,10 @@ export async function shouldRemotePoll(): Promise<boolean> {
   const settings = await SettingsStore.loadSettings();
 
   if (settings.monitoringMode === 'geofenced') {
-    if (!settings.homeZone) return false;
-    const state = await GeofenceStore.getState();
-    return state.inside !== true; // poll when outside or unknown
+    if (settings.homeZone) {
+      const state = await GeofenceStore.getState();
+      if (state.inside !== true || !ForegroundServiceManager.isServiceRunning()) return true;
+    }
   }
 
   // 'always' mode (and its dataSync-typed fallback shapes): only when the OS
@@ -65,6 +68,9 @@ export async function shouldRemotePoll(): Promise<boolean> {
  * Records transition latency: task entry -> monitoring FGS started.
  */
 export async function handleGeofenceTransition(isEnter: boolean): Promise<void> {
+  const settings = await SettingsStore.loadSettings();
+  // Ignore late deliveries from a fence that was removed or a signed-out account.
+  if (settings.monitoringMode !== 'geofenced' || !settings.homeZone || !(await Store.getSystemId())) return;
   const transitionStart = Date.now();
 
   if (isEnter) {
@@ -88,8 +94,13 @@ export async function handleGeofenceTransition(isEnter: boolean): Promise<void> 
     await GeofenceStore.recordEvent({ kind: 'EXIT', at: transitionStart });
     await GeofenceStore.stampBootMarker();
 
-    // Leaving the zone: run a final poll with remote flag so the transition
-    // diff is up to date, then stop the FGS entirely.
+    // Stop before waiting for HTTP: a headless execution deadline or offline
+    // API must never leave the local monitoring service running outside.
+    await ForegroundServiceManager.stopService().catch((err) => {
+      console.warn('[GeofenceTask] EXIT -> FGS stop failed:', err);
+    });
+
+    // Run a final remote poll to update the transition baseline.
     try {
       await pollOnce(true);
     } catch (err) {
@@ -97,7 +108,6 @@ export async function handleGeofenceTransition(isEnter: boolean): Promise<void> 
     }
 
     try {
-      await ForegroundServiceManager.stopService();
       const latency = Date.now() - transitionStart;
       await GeofenceStore.recordTransitionLatency('EXIT', latency);
       console.log(`[GeofenceTask] EXIT -> monitoring service stopped (${latency}ms).`);
@@ -130,6 +140,8 @@ async function geofenceTaskExecutor({
 
   const eventType = data?.eventType;
   const region = data?.region;
+
+  if (eventType !== LocationGeofencingEventType.Enter && eventType !== LocationGeofencingEventType.Exit) return;
 
   const isEnter = eventType === LocationGeofencingEventType.Enter;
 

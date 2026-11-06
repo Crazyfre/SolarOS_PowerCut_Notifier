@@ -10,6 +10,13 @@ const FENCE_STATE_KEY = 'sg_geo_state';
 const FENCE_LAST_EVENT_KEY = 'sg_geo_last_event';
 const FENCE_BOOT_MARKER_KEY = 'sg_geo_boot_marker';
 const FENCE_LAST_TRANSITION_LATENCY_KEY = 'sg_geo_last_transition_latency';
+let stateWrites: Promise<void> = Promise.resolve();
+
+function writeState<T>(action: () => Promise<T>): Promise<T> {
+  const pending = stateWrites.then(action);
+  stateWrites = pending.then(() => {}, () => {});
+  return pending;
+}
 
 export interface GeofenceState {
   /** true = inside home zone, false = outside, null = never seen a transition */
@@ -39,14 +46,16 @@ export const GeofenceStore = {
   },
 
   async setState(next: Partial<GeofenceState>): Promise<GeofenceState> {
-    const current = await this.getState();
-    const merged: GeofenceState = { ...current, ...next };
-    try {
-      await AsyncStorage.setItem(FENCE_STATE_KEY, JSON.stringify(merged));
-    } catch (error) {
-      console.warn('[GeofenceStore] Failed to persist fence state:', error);
-    }
-    return merged;
+    return writeState(async () => {
+      const current = await this.getState();
+      const merged: GeofenceState = { ...current, ...next };
+      try {
+        await AsyncStorage.setItem(FENCE_STATE_KEY, JSON.stringify(merged));
+      } catch (error) {
+        console.warn('[GeofenceStore] Failed to persist fence state:', error);
+      }
+      return merged;
+    });
   },
 
   async recordEvent(event: GeofenceEventRecord): Promise<void> {
@@ -67,17 +76,19 @@ export const GeofenceStore = {
   },
 
   async clear(): Promise<void> {
-    try {
-      await AsyncStorage.multiRemove([FENCE_STATE_KEY, FENCE_LAST_EVENT_KEY]);
-    } catch {
-      // Non-fatal
-    }
+    return writeState(async () => {
+      try {
+        await AsyncStorage.multiRemove([FENCE_STATE_KEY, FENCE_LAST_EVENT_KEY, FENCE_BOOT_MARKER_KEY, FENCE_LAST_TRANSITION_LATENCY_KEY]);
+      } catch {
+        // Non-fatal
+      }
+    });
   },
 
   /**
    * Boot-identity helper: returns a stable string that is constant within
    * one device boot and (practically always) changes across reboots.
-   * Derived natively as wallClock - elapsedRealtime. Returns null off-Android
+   * Read natively from the OS boot counter. Returns null off-Android
    * or when the native module is unavailable.
    */
   async getBootId(): Promise<string | null> {
@@ -111,20 +122,22 @@ export const GeofenceStore = {
 
   /** Invalidate persisted fence state (e.g. after reboot detection). */
   async invalidateState(): Promise<void> {
-    try {
-      await AsyncStorage.setItem(FENCE_STATE_KEY, JSON.stringify({
-        inside: null,
-        lastTransitionAt: null,
-        registeredAt: null,
-      }));
-      await GeofenceStore.recordEvent({
-        kind: 'ERROR',
-        at: Date.now(),
-        detail: 'fence state reset (device reboot or fence re-registration)',
-      });
-    } catch {
-      // Non-fatal
-    }
+    return writeState(async () => {
+      try {
+        await AsyncStorage.setItem(FENCE_STATE_KEY, JSON.stringify({
+          inside: null,
+          lastTransitionAt: null,
+          registeredAt: null,
+        }));
+        await GeofenceStore.recordEvent({
+          kind: 'ERROR',
+          at: Date.now(),
+          detail: 'fence state reset (device reboot or fence re-registration)',
+        });
+      } catch {
+        // Non-fatal
+      }
+    });
   },
 
   /** Persist the current boot identity alongside fence state. */
@@ -184,7 +197,7 @@ export function distanceMeters(
     Math.cos((lat1 * Math.PI) / 180) *
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
+  return 2 * R * Math.asin(Math.sqrt(Math.min(1, Math.max(0, a))));
 }
 
 export function isInsideZone(zone: HomeZone, lat: number, lng: number): boolean {

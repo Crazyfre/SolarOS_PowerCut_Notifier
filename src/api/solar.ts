@@ -1,7 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 import { TelemetryData } from '../types/telemetry';
 import { Store } from '../storage/secureStore';
-import { refreshAccessToken } from './auth';
+import { AuthService } from '../services/authService';
 import { DevOverridesStore } from '../storage/devOverridesStore';
 
 // ─── Base URL — configurable, defaults to EU region ───────────────────────────
@@ -31,25 +31,27 @@ function createClient(token: string): AxiosInstance {
  * Get a valid access token, auto-refreshing if expired.
  * Throws 'AUTH_REQUIRED' if refresh also fails.
  */
-async function getValidToken(): Promise<string> {
-  const isExpired = await Store.isTokenExpired();
-  if (!isExpired) {
-    const token = await Store.getAccessToken();
-    if (token) return token;
-  }
+async function getValidToken(rejectedToken?: string): Promise<string> {
+  const token = await AuthService.getAccessToken(rejectedToken);
+  if (!token) throw new Error('AUTH_REQUIRED');
+  return token;
+}
 
-  // Try refresh
-  const refreshToken = await Store.getRefreshToken();
-  if (!refreshToken) throw new Error('AUTH_REQUIRED');
-
+async function authorizedRequest<T>(request: (client: AxiosInstance) => Promise<T>, accessToken?: string): Promise<T> {
+  const version = Store.getSessionVersion();
+  const token = accessToken || await getValidToken();
   try {
-    const tokens = await refreshAccessToken(refreshToken);
-    await Store.setAccessToken(tokens.access_token);
-    await Store.setRefreshToken(tokens.refresh_token);
-    await Store.setTokenExpiry(tokens.expires_in);
-    return tokens.access_token;
-  } catch {
-    throw new Error('AUTH_REQUIRED');
+    return await request(createClient(token));
+  } catch (error) {
+    if (!axios.isAxiosError(error) || error.response?.status !== 401) throw error;
+    if (accessToken || version !== Store.getSessionVersion()) throw new Error('AUTH_REQUIRED');
+    const refreshed = await getValidToken(token);
+    try {
+      return await request(createClient(refreshed));
+    } catch (retryError) {
+      if (axios.isAxiosError(retryError) && retryError.response?.status === 401) throw new Error('AUTH_REQUIRED');
+      throw retryError;
+    }
   }
 }
 
@@ -81,10 +83,7 @@ interface StationSearchResponse {
  * If multiple stations exist, returns all — the caller shows a picker.
  */
 export async function fetchStations(accessToken?: string): Promise<{ id: string; name: string }[]> {
-  const token = accessToken || await getValidToken();
-  const client = createClient(token);
-
-  const response = await client.post<StationSearchResponse>(
+  const response = await authorizedRequest((client) => client.post<StationSearchResponse>(
     '/maintain-s/operating/station/v2/search',
     {},
     {
@@ -95,7 +94,7 @@ export async function fetchStations(accessToken?: string): Promise<{ id: string;
         'order.property': 'name',
       },
     }
-  );
+  ), accessToken);
 
   const raw = response.data?.data ?? response.data?.list ?? [];
 
@@ -109,7 +108,7 @@ export async function fetchStations(accessToken?: string): Promise<{ id: string;
         `Station ${id}`;
       return { id: String(id), name };
     })
-    .filter((s) => s.id && s.id !== 'undefined');
+    .filter((s) => s.id && s.id !== 'undefined' && s.id !== 'null');
 }
 
 // ─── Telemetry ────────────────────────────────────────────────────────────────
@@ -118,14 +117,29 @@ export async function fetchStations(accessToken?: string): Promise<{ id: string;
  * Fetch live telemetry for a station.
  * Auto-retries once on 401 after token refresh.
  */
+const telemetryInFlight = new Map<string, Promise<TelemetryData>>();
+
 export async function fetchTelemetry(systemId: string): Promise<TelemetryData> {
-  let token = await getValidToken();
-  let client = createClient(token);
+  const key = `${Store.getSessionVersion()}:${systemId}`;
+  const pending = telemetryInFlight.get(key);
+  if (pending) return pending;
+  const request = fetchTelemetryOnce(systemId);
+  telemetryInFlight.set(key, request);
+  try {
+    return await request;
+  } finally {
+    if (telemetryInFlight.get(key) === request) telemetryInFlight.delete(key);
+  }
+}
+
+async function fetchTelemetryOnce(systemId: string): Promise<TelemetryData> {
 
   const mapTelemetry = async (data: any): Promise<TelemetryData> => {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid telemetry response.');
     const overrides = await DevOverridesStore.getOverrides();
     const mapped: TelemetryData = {
       ...data,
+      systemId,
       pvPower: data.pvPower ?? data.generationPower,
       batteryPower: data.batteryPower ?? 0, // default if not set
     };
@@ -147,32 +161,35 @@ export async function fetchTelemetry(systemId: string): Promise<TelemetryData> {
       if (overrides.pvPower !== undefined) mapped.pvPower = overrides.pvPower;
       if (overrides.usePower !== undefined) mapped.usePower = overrides.usePower;
     }
+    if (mapped.gridRelayStatus !== 'on' && mapped.gridRelayStatus !== 'off') {
+      throw new Error('Invalid telemetry: missing or unknown grid relay status.');
+    }
+    // API counters may be numeric strings. Normalize once at the boundary so
+    // screens, reports and calculations never call toFixed on a string.
+    for (const field of numericTelemetryFields) {
+      const value: unknown = mapped[field];
+      if (value == null) continue;
+      const number = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+      if (!Number.isFinite(number)) throw new Error(`Invalid telemetry: ${field} is not a finite number.`);
+      (mapped as any)[field] = number;
+    }
+    if (mapped.batterySoc == null || mapped.batterySoc < 0 || mapped.batterySoc > 100) {
+      throw new Error('Invalid telemetry: battery charge must be between 0 and 100.');
+    }
     return mapped;
   };
 
-  try {
-    const response = await client.get<TelemetryData>(
+  const response = await authorizedRequest((client) => client.get<TelemetryData>(
       `/maintain-s/operating/system/${systemId}`
-    );
-    return await mapTelemetry(response.data);
-  } catch (error: unknown) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      // Force refresh and retry once
-      const refreshToken = await Store.getRefreshToken();
-      if (refreshToken) {
-        const tokens = await refreshAccessToken(refreshToken);
-        await Store.setAccessToken(tokens.access_token);
-        await Store.setRefreshToken(tokens.refresh_token);
-        await Store.setTokenExpiry(tokens.expires_in);
-
-        client = createClient(tokens.access_token);
-        const retryResponse = await client.get<TelemetryData>(
-          `/maintain-s/operating/system/${systemId}`
-        );
-        return await mapTelemetry(retryResponse.data);
-      }
-      throw new Error('AUTH_REQUIRED');
-    }
-    throw error;
-  }
+  ));
+  return mapTelemetry(response.data);
 }
+
+const numericTelemetryFields = [
+  'wirePower', 'gridValue', 'gridMonth', 'gridYear', 'gridTotal',
+  'buyValue', 'buyMonth', 'buyYear', 'buyTotal', 'batterySoc', 'batteryBv', 'batteryPower',
+  'chargeValue', 'dischargeValue', 'chargeMonth', 'chargeYear', 'chargeTotal',
+  'dischargeMonth', 'dischargeYear', 'dischargeTotal', 'pvPower',
+  'generationValue', 'generationMonth', 'generationYear', 'generationTotal',
+  'usePower', 'useValue', 'useMonth', 'useYear', 'useTotal',
+] as const;

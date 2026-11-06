@@ -1,5 +1,15 @@
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { AuthTokens } from '../types/telemetry';
+
+let sessionVersion = 0;
+let authWrites: Promise<void> = Promise.resolve();
+
+function writeAuth(action: () => Promise<void>): Promise<void> {
+  const pending = authWrites.then(action);
+  authWrites = pending.catch(() => {});
+  return pending;
+}
 
 // Key constants
 const KEYS = {
@@ -33,6 +43,14 @@ async function remove(key: StoreKey): Promise<void> {
 
 // Typed setters/getters
 export const Store = {
+  getSessionVersion: () => sessionVersion,
+  invalidateSession: () => { sessionVersion += 1; },
+  saveTokens: (tokens: AuthTokens, expectedVersion = sessionVersion) => writeAuth(async () => {
+    if (expectedVersion !== sessionVersion) throw new Error('AUTH_REQUIRED');
+    await set(KEYS.REFRESH_TOKEN, tokens.refresh_token);
+    await set(KEYS.ACCESS_TOKEN, tokens.access_token);
+    await set(KEYS.TOKEN_EXPIRY, String(Date.now() + tokens.expires_in * 1000));
+  }),
   // Email
   setEmail: (email: string) => set(KEYS.EMAIL, email),
   getEmail: () => get(KEYS.EMAIL),
@@ -56,7 +74,8 @@ export const Store = {
   isTokenExpired: async () => {
     const raw = await get(KEYS.TOKEN_EXPIRY);
     if (!raw) return true;
-    return Date.now() > parseInt(raw, 10);
+    const expiry = Number(raw);
+    return !Number.isFinite(expiry) || Date.now() >= expiry - 30_000;
   },
 
   // System ID
@@ -86,7 +105,10 @@ export const Store = {
 
   // Clear all auth data on logout
   clearAll: async () => {
-    await Promise.all(Object.values(KEYS).map((k) => SecureStore.deleteItemAsync(k)));
+    sessionVersion += 1;
+    await writeAuth(async () => {
+      await Promise.all(Object.values(KEYS).map((k) => SecureStore.deleteItemAsync(k)));
+    });
     await AsyncStorage.multiRemove(Object.values(ASYNC_KEYS));
   },
 };

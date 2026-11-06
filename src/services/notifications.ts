@@ -3,7 +3,7 @@ import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 import { TelemetryData, AppSettings } from '../types/telemetry';
 import { DEFAULT_SETTINGS } from '../storage/settingsStore';
-import { serviceColors } from '../theme';
+import { serviceColors } from '../theme/serviceColors';
 import OutageAlarm from '../../modules/outage-alarm';
 
 export const ALARM_SOUND_OPTIONS = [
@@ -19,9 +19,9 @@ const isExpoGo =
 
 if (!isExpoGo) {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
+    handleNotification: async (notification) => ({
       shouldShowAlert: true,
-      shouldPlaySound: true,
+      shouldPlaySound: notification.request.content.data?.sgSilent !== true,
       shouldSetBadge: false,
       shouldShowBanner: true,
       shouldShowList: true,
@@ -57,6 +57,15 @@ export async function registerNotificationChannels(): Promise<void> {
       importance: Notifications.AndroidImportance.DEFAULT,
       lightColor: serviceColors.brand,
     });
+
+    for (const noPopup of [false, true]) {
+      await Notifications.setNotificationChannelAsync(noPopup ? 'sg_quiet_no_popup' : 'sg_quiet', {
+        name: noPopup ? 'Quiet Hours (No Popup)' : 'Quiet Hours',
+        importance: noPopup ? Notifications.AndroidImportance.DEFAULT : Notifications.AndroidImportance.HIGH,
+        sound: null,
+        enableVibrate: false,
+      });
+    }
 
     // 4. Power Cut Alarms (Default/legacy channel, custom alarm sound)
     await Notifications.setNotificationChannelAsync('solarguard_alarm_v2', {
@@ -120,13 +129,38 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 // â”€â”€â”€ Shared helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function scheduleNotification(
-  content: Notifications.NotificationContentInput
+  content: Notifications.NotificationContentInput & { channelId?: string }
 ): Promise<string | undefined> {
   if (isExpoGo) {
     console.info(`[SolarGuard Notification] ${content.title}: ${content.body}`);
     return undefined;
   }
-  return await Notifications.scheduleNotificationAsync({ content, trigger: null });
+  const { channelId, ...notificationContent } = content;
+  return await Notifications.scheduleNotificationAsync({
+    content: { ...notificationContent, data: { ...content.data, sgSilent: content.sound === false } },
+    // Expo reads the Android channel from the trigger, not the content.
+    trigger: Platform.OS === 'android' && channelId ? { channelId } : null,
+  });
+}
+
+export function isWithinQuietHours(settings: AppSettings, now = new Date()): boolean {
+  if (!settings.quietHoursEnabled) return false;
+  const parseTime = (value: string): number | null => {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
+    const [hours, minutes] = value.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+  const start = parseTime(settings.quietHoursStart);
+  const end = parseTime(settings.quietHoursEnd);
+  if (start === null || end === null || start === end) return false;
+  const minute = now.getHours() * 60 + now.getMinutes();
+  return start < end ? minute >= start && minute < end : minute >= start || minute < end;
+}
+
+export function stopOutageAlarm(): void {
+  if (Platform.OS !== 'android') return;
+  try { OutageAlarm.stopAlarm(); }
+  catch (error) { console.warn('Failed to stop native alarm:', error); }
 }
 
 // â”€â”€â”€ Sound Options & Dynamic routing helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -156,10 +190,14 @@ function getNotificationRouting(
   const noPopup = settings.onlyAlarmNoPopup;
   const soundId = settings.alarmSoundName ?? 'alarm';
 
+  if (isWithinQuietHours(settings)) {
+    return { channelId: noPopup ? 'sg_quiet_no_popup' : 'sg_quiet', sound: false, allowSiren: false };
+  }
+
   if (useAlarm) {
     const option = ALARM_SOUND_OPTIONS.find(o => o.id === soundId) ?? ALARM_SOUND_OPTIONS[0];
     return {
-      channelId: noPopup ? `sg_silent_alarm_v2_${soundId}` : `sg_alarm_v2_${soundId}`,
+      channelId: noPopup ? `sg_silent_alarm_v2_${option.id}` : `sg_alarm_v2_${option.id}`,
       sound: Platform.OS === 'ios' ? option.file : true,
       allowSiren: true,
     };
@@ -222,7 +260,7 @@ export async function sendGridRestoredNotification(
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
   const durationStr = hours > 0 ? `${hours}h ${mins}m` : `${minutes}m`;
-  const routing = getNotificationRouting(false, settings);
+  const routing = getNotificationRouting(false, settings, context);
 
   if (Platform.OS === 'android') {
     try {

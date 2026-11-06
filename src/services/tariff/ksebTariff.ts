@@ -149,7 +149,8 @@ export function marginalUnitCost(units: number, cfg: TariffConfig = DEFAULT_KSEB
  * telescopic unit and the first non-telescopic unit.
  */
 export function cliffJump(cfg: TariffConfig = DEFAULT_KSEB_TARIFF): number {
-  return round2(estimateBill(251, cfg).total - estimateBill(250, cfg).total);
+  const boundary = 250 * (cfg.monthlyCycleFactor ?? 1);
+  return round2(estimateBill(boundary + 1, cfg).total - estimateBill(boundary, cfg).total);
 }
 
 function round2(n: number): number {

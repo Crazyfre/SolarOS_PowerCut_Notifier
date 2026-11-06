@@ -19,6 +19,8 @@ interface SegmentedControlProps<T extends string | number> {
   /** tint for the active segment (defaults to brand) */
   activeTint?: string;
   testID?: string;
+  /** Use wrapping labels and two columns for long options on narrow screens. */
+  wrap?: boolean;
 }
 
 export function SegmentedControl<T extends string | number>({
@@ -27,12 +29,13 @@ export function SegmentedControl<T extends string | number>({
   onChange,
   activeTint,
   testID,
+  wrap = false,
 }: SegmentedControlProps<T>) {
   const { colors } = useTheme();
   const tint = activeTint ?? colors.brand;
 
   return (
-    <View style={styles.track} testID={testID}>
+    <View style={[styles.track, wrap && styles.wrappedTrack]} testID={testID}>
       {options.map((opt) => {
         const active = opt.value === value;
         return (
@@ -40,9 +43,11 @@ export function SegmentedControl<T extends string | number>({
             key={String(opt.value)}
             onPress={() => onChange(opt.value)}
             accessibilityRole="radio"
+            accessibilityLabel={opt.label}
             accessibilityState={{ selected: active }}
             style={[
               styles.segment,
+              wrap && styles.wrappedSegment,
               {
                 backgroundColor: active ? tint : colors.surface2,
                 borderColor: active ? tint : colors.border,
@@ -55,7 +60,7 @@ export function SegmentedControl<T extends string | number>({
                 styles.label,
                 { color: active ? colors.textInverse : colors.textSecondary },
               ]}
-              numberOfLines={1}
+              numberOfLines={wrap ? undefined : 1}
             >
               {opt.label}
             </Text>
@@ -78,13 +83,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    minHeight: 40,
+    minHeight: 44,
     borderRadius: BorderRadius.md,
     borderWidth: 1,
     paddingHorizontal: Spacing.xs,
   },
+  wrappedTrack: { flexWrap: 'wrap' },
+  wrappedSegment: { flexBasis: '45%', paddingVertical: Spacing.sm },
   iconWrap: {},
   label: {
+    flexShrink: 1,
     fontFamily: Typography.fontFamily.semiBold,
     fontSize: Typography.fontSize.sm,
     textAlign: 'center',

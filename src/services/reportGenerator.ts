@@ -243,8 +243,8 @@ export const ReportGenerator = {
               <span class="info-value">${escapeHtml(stationName || 'SolarGuard Station')}</span>
             </div>
             <div class="info-item">
-              <span class="info-label">Installed Capacity</span>
-              <span class="info-value">${settings.batteryCapacity ? (settings.batteryCapacity * 1.2).toFixed(2) : '5.0'} kWp</span>
+              <span class="info-label">Battery Storage Capacity</span>
+              <span class="info-value">${settings.batteryCapacity.toFixed(2)} kWh</span>
             </div>
             <div class="info-item">
               <span class="info-label">System ID</span>

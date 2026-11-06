@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useApp } from '../context/AppContext';
+import { TabSwipeRegion } from '../components/TabSwipeRegion';
 import { useTheme, withAlpha, Typography, Spacing, PAGE_GUTTER } from '../theme';
 import { OutageRecord } from '../types/telemetry';
 import Svg, { Line, Circle, Rect } from 'react-native-svg';
@@ -31,7 +32,7 @@ import {
   Timer,
   RefreshCcw,
   ChevronDown,
-} from 'lucide-react-native';
+} from '../components/icons';
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], {
@@ -41,7 +42,7 @@ function formatTime(ts: number): string {
 }
 
 function formatDuration(ms?: number): string {
-  if (!ms) return 'Ongoing';
+  if (ms == null) return 'Ongoing';
   const totalSeconds = Math.floor(ms / 1000);
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
@@ -169,7 +170,7 @@ const OutageCard = React.memo(function OutageCard({ item, threshold }: { item: O
   const isOngoing = !item.endTime;
   const duration = item.endTime ? item.endTime - item.startTime : undefined;
 
-  const startSoc = 100; // outages begin at grid-cut; detector assumes full battery baseline
+  const startSoc = item.startBatterySoc;
   const endSoc = item.minBatterySoc ?? 100;
   const warningHit = endSoc <= threshold;
 
@@ -186,7 +187,16 @@ const OutageCard = React.memo(function OutageCard({ item, threshold }: { item: O
         />
       ) : null}
 
-      <View style={styles.cardHeader}>
+      <TouchableOpacity
+        style={styles.cardHeader}
+        onPress={() => setExpanded((current) => !current)}
+        disabled={isOngoing}
+        accessible={!isOngoing}
+        activeOpacity={0.9}
+        accessibilityRole="button"
+        accessibilityLabel="Outage details"
+        accessibilityState={{ expanded: !isOngoing && expanded, disabled: isOngoing }}
+      >
         <Text style={[styles.cardDay, { color: colors.textSecondary }]}>
           {getRelativeDateStr(item.startTime)}
         </Text>
@@ -205,7 +215,7 @@ const OutageCard = React.memo(function OutageCard({ item, threshold }: { item: O
             />
           </View>
         )}
-      </View>
+      </TouchableOpacity>
 
       <View style={[styles.titleRow, { borderColor: colors.divider }]}>
         <View style={styles.titleLeft}>
@@ -250,7 +260,7 @@ const OutageCard = React.memo(function OutageCard({ item, threshold }: { item: O
           <Text style={[styles.batteryLabel, { color: colors.textSecondary }]}>Battery usage</Text>
         </View>
         <Text style={[styles.batteryValue, { color: warningHit ? colors.dangerText : colors.chargeText }]}>
-          {startSoc}% → {endSoc}%
+          {startSoc ?? '—'}% → {item.endBatterySoc ?? endSoc}%
         </Text>
       </View>
 
@@ -259,12 +269,12 @@ const OutageCard = React.memo(function OutageCard({ item, threshold }: { item: O
         <View style={[styles.expanded, { borderTopColor: colors.divider }]}>
           <Text style={[styles.expandedTitle, { color: colors.textSecondary }]}>Battery During Outage</Text>
           <View style={[styles.chartWrap, { backgroundColor: colors.surface2, borderColor: colors.border }]}>
-            <BatteryDeclineChart
+            {startSoc != null && <BatteryDeclineChart
               startSoc={startSoc}
               endSoc={endSoc}
               threshold={threshold}
               warningHit={warningHit}
-            />
+            />}
             <View style={styles.chartLegend}>
               <View style={styles.legendItem}>
                 <View style={[styles.legendSwatch, { backgroundColor: warningHit ? colors.danger : colors.charge }]} />
@@ -296,7 +306,7 @@ const OutageCard = React.memo(function OutageCard({ item, threshold }: { item: O
             <View style={styles.timelineEvent}>
               <TriangleAlert size={13} color={colors.chargeText} strokeWidth={2} />
               <Text style={[styles.timelineText, { color: colors.textSecondary }]}>
-                {formatTime(item.startTime)} — Outage started (Battery {startSoc}%)
+                {formatTime(item.startTime)} — Outage started (Battery {startSoc ?? 'unknown'}%)
               </Text>
             </View>
             {warningHit ? (
@@ -311,7 +321,7 @@ const OutageCard = React.memo(function OutageCard({ item, threshold }: { item: O
               <View style={styles.timelineEvent}>
                 <CircleCheckBig size={13} color={colors.successText} strokeWidth={2} />
                 <Text style={[styles.timelineText, { color: colors.textSecondary }]}>
-                  {formatTime(item.endTime)} — Grid restored (Battery {endSoc}%)
+                  {formatTime(item.endTime)} — Grid restored (Battery {item.endBatterySoc ?? 'unknown'}%)
                 </Text>
               </View>
             ) : null}
@@ -372,23 +382,25 @@ export function HistoryScreen() {
         }
       />
 
-      {sortedHistory.length === 0 ? (
-        <View style={styles.emptyState}>
-          <CircleCheckBig size={48} color={colors.success} strokeWidth={1.5} style={{ marginBottom: Spacing.lg }} />
-          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>No outages recorded</Text>
-          <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-            Your grid has been stable. SolarGuard will log any outages here.
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={sortedHistory}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
+      <TabSwipeRegion>
+        {sortedHistory.length === 0 ? (
+          <View style={styles.emptyState}>
+            <CircleCheckBig size={48} color={colors.success} strokeWidth={1.5} style={{ marginBottom: Spacing.lg }} />
+            <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>No outages recorded</Text>
+            <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+              Your grid has been stable. SolarGuard will log any outages here.
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={sortedHistory}
+            keyExtractor={(item) => item.id}
+            renderItem={renderItem}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
+      </TabSwipeRegion>
     </View>
   );
 }
@@ -420,6 +432,7 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   cardHeader: {
+    minHeight: 44,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',

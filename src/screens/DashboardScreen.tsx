@@ -14,6 +14,7 @@ import { useApp } from '../context/AppContext';
 import { useTheme, Typography, Spacing, PAGE_GUTTER } from '../theme';
 import { StatusCard } from '../components/StatusCard';
 import { PowerFlowDiagram } from '../components/PowerFlowDiagram';
+import { TabSwipeRegion } from '../components/TabSwipeRegion';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { Store } from '../storage/secureStore';
 import { isRunningInExpoGo } from '../services/notifications';
@@ -51,7 +52,7 @@ import {
   SunMedium,
   CircleCheckBig,
   LogOut,
-} from 'lucide-react-native';
+} from '../components/icons';
 
 function formatPower(watts: number): string {
   return `${Math.round(watts)} W`;
@@ -333,278 +334,280 @@ export function DashboardScreen() {
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <DashboardHeader lastFetchTime={lastFetchTime} isFetching={isFetching} />
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={isFetching}
-            onRefresh={onRefresh}
-            tintColor={colors.brand}
-            colors={[colors.brand]}
-          />
-        }
-      >
-        {/* No data yet */}
-        {!telemetry && !fetchError && !isFetching ? (
-          <View style={styles.emptyState}>
-            <Radio size={48} color={colors.textDisabled} style={{ marginBottom: Spacing.base }} />
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              Fetching inverter data…
-            </Text>
-          </View>
-        ) : null}
-
-        {/* Single-slot status banner */}
-        {banner ? (
-          <View style={styles.bannerWrap} key={banner.variant + banner.title}>
-            <Banner
-              variant={banner.variant}
-              title={banner.title}
-              subtitle={banner.subtitle}
-              metrics={'metrics' in banner ? banner.metrics : undefined}
-              actions={banner.actions}
-              onPress={banner.onPress}
-              infoTone={banner.infoTone}
-              testID="status-banner"
+      <TabSwipeRegion>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isFetching}
+              onRefresh={onRefresh}
+              tintColor={colors.brand}
+              colors={[colors.brand]}
             />
-          </View>
-        ) : null}
+          }
+        >
+          {/* No data yet */}
+          {!telemetry && !fetchError && !isFetching ? (
+            <View style={styles.emptyState}>
+              <Radio size={48} color={colors.textDisabled} style={{ marginBottom: Spacing.base }} />
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                Fetching inverter data…
+              </Text>
+            </View>
+          ) : null}
 
-        {telemetry ? (
-          <>
-            {/* Power flow — the hero instrument */}
-            <SectionHeader title="Power Flow" />
-            <Card style={styles.flowCard}>
-              <PowerFlowDiagram
-                gridOn={!!isGridOn}
-                pvPower={telemetry.pvPower}
-                batteryStatus={telemetry.batteryStatus}
-                usePower={telemetry.usePower}
-                wirePower={telemetry.wirePower}
-                batterySoc={telemetry.batterySoc}
+          {/* Single-slot status banner */}
+          {banner ? (
+            <View style={styles.bannerWrap} key={banner.variant + banner.title}>
+              <Banner
+                variant={banner.variant}
+                title={banner.title}
+                subtitle={banner.subtitle}
+                metrics={'metrics' in banner ? banner.metrics : undefined}
+                actions={banner.actions}
+                onPress={banner.onPress}
+                infoTone={banner.infoTone}
+                testID="status-banner"
               />
-            </Card>
+            </View>
+          ) : null}
 
-            {/* Battery + backup estimate */}
-            <SectionHeader title="Battery" right={<Badge label={`${getBackupTimeText()} left`} tone={(telemetry.batterySoc ?? 0) <= warningThreshold ? 'danger' : 'neutral'} />} />
-            <Card>
-              <View style={styles.batteryTop}>
-                <View style={styles.batteryId}>
-                  {batteryIsCharging ? (
-                    <BatteryCharging size={20} color={colors.charge} strokeWidth={2} />
-                  ) : telemetry.batteryStatus === 'DISCHARGE' ? (
-                    <BatteryMedium size={20} color={colors.discharge} strokeWidth={2} />
-                  ) : (
-                    <BatteryMedium size={20} color={colors.textSecondary} strokeWidth={2} />
-                  )}
-                  <Text style={[styles.batteryState, { color: colors.textPrimary }]}>
-                    {telemetry.batteryStatus === 'CHARGE'
+          {telemetry ? (
+            <>
+              {/* Power flow — the hero instrument */}
+              <SectionHeader title="Power Flow" />
+              <Card style={styles.flowCard}>
+                <PowerFlowDiagram
+                  gridOn={!!isGridOn}
+                  pvPower={telemetry.pvPower}
+                  batteryStatus={telemetry.batteryStatus}
+                  usePower={telemetry.usePower}
+                  wirePower={telemetry.wirePower}
+                  batterySoc={telemetry.batterySoc}
+                />
+              </Card>
+
+              {/* Battery + backup estimate */}
+              <SectionHeader title="Battery" right={<Badge label={`${getBackupTimeText()} left`} tone={(telemetry.batterySoc ?? 0) <= warningThreshold ? 'danger' : 'neutral'} />} />
+              <Card>
+                <View style={styles.batteryTop}>
+                  <View style={styles.batteryId}>
+                    {batteryIsCharging ? (
+                      <BatteryCharging size={20} color={colors.charge} strokeWidth={2} />
+                    ) : telemetry.batteryStatus === 'DISCHARGE' ? (
+                      <BatteryMedium size={20} color={colors.discharge} strokeWidth={2} />
+                    ) : (
+                      <BatteryMedium size={20} color={colors.textSecondary} strokeWidth={2} />
+                    )}
+                    <Text style={[styles.batteryState, { color: colors.textPrimary }]}>
+                      {telemetry.batteryStatus === 'CHARGE'
+                        ? 'Charging'
+                        : telemetry.batteryStatus === 'DISCHARGE'
+                          ? 'Discharging'
+                          : 'Idle'}
+                    </Text>
+                    {(telemetry.batterySoc ?? 0) <= warningThreshold && (
+                      <Badge label="Low" tone="danger" />
+                    )}
+                  </View>
+                  <Text style={[styles.batteryVoltage, { color: colors.textSecondary }]}>
+                    {telemetry.batteryBv ?? 0} V
+                  </Text>
+                </View>
+                <View style={styles.batteryReadout}>
+                  <Text style={[styles.batteryPercent, { color: colors.textPrimary }]}>
+                    {Math.round(telemetry.batterySoc ?? 0)}
+                    <Text style={[styles.batteryPercentUnit, { color: colors.textSecondary }]}>%</Text>
+                  </Text>
+                  <Text style={[styles.batteryPowerText, { color: batteryIsCharging ? colors.chargeText : colors.dischargeText }]}>
+                    {telemetry.batteryStatus === 'IDLE'
+                      ? '0 W'
+                      : `${telemetry.batteryStatus === 'CHARGE' ? '+' : '−'}${formatPower(Math.abs(telemetry.batteryPower ?? 0))}`}
+                  </Text>
+                </View>
+                <Gauge value={telemetry.batterySoc ?? 0} />
+              </Card>
+
+              {/* Stats — 4 across, one row */}
+              <SectionHeader title="Telemetry" />
+              <View style={styles.statsRow4}>
+                <StatusCard
+                  compact
+                  title="Grid"
+                  value={isGridOn ? 'On' : 'Off'}
+                  subtitle={isGridOn ? 'Connected' : 'Power cut'}
+                  tone={isGridOn ? 'success' : 'danger'}
+                  live={isGridOn}
+                  testID="card-grid"
+                />
+                <StatusCard
+                  compact
+                  title="Load"
+                  value={formatPower(telemetry.usePower ?? 0)}
+                  subtitle={`${(telemetry.useValue ?? 0).toFixed(1)} kWh`}
+                  numeric
+                  icon={<House size={14} color={colors.textSecondary} strokeWidth={2} />}
+                  testID="card-load"
+                />
+                <StatusCard
+                  compact
+                  title="Battery"
+                  value={`${Math.round(telemetry.batterySoc ?? 0)}%`}
+                  subtitle={
+                    telemetry.batteryStatus === 'CHARGE'
                       ? 'Charging'
                       : telemetry.batteryStatus === 'DISCHARGE'
                         ? 'Discharging'
-                        : 'Idle'}
-                  </Text>
-                  {(telemetry.batterySoc ?? 0) <= warningThreshold && (
-                    <Badge label="Low" tone="danger" />
-                  )}
-                </View>
-                <Text style={[styles.batteryVoltage, { color: colors.textSecondary }]}>
-                  {telemetry.batteryBv ?? 0} V
-                </Text>
+                        : 'Idle'
+                  }
+                  tone={batteryIsCharging ? 'info' : telemetry.batteryStatus === 'DISCHARGE' ? 'discharge' : 'neutral'}
+                  icon={batteryIcon}
+                  testID="card-battery"
+                />
+                <StatusCard
+                  compact
+                  title="Solar"
+                  value={formatPower(telemetry.pvPower ?? 0)}
+                  subtitle={`${(telemetry.generationValue ?? 0).toFixed(1)} kWh`}
+                  tone="brand"
+                  live={(telemetry.pvPower ?? 0) > 0}
+                  numeric
+                  icon={<SunMedium size={14} color={(telemetry.pvPower ?? 0) > 0 ? colors.brand : colors.textDisabled} strokeWidth={2} />}
+                  testID="card-solar"
+                />
               </View>
-              <View style={styles.batteryReadout}>
-                <Text style={[styles.batteryPercent, { color: colors.textPrimary }]}>
-                  {Math.round(telemetry.batterySoc ?? 0)}
-                  <Text style={[styles.batteryPercentUnit, { color: colors.textSecondary }]}>%</Text>
-                </Text>
-                <Text style={[styles.batteryPowerText, { color: batteryIsCharging ? colors.chargeText : colors.dischargeText }]}>
-                  {telemetry.batteryStatus === 'IDLE'
-                    ? '0 W'
-                    : `${telemetry.batteryStatus === 'CHARGE' ? '+' : '−'}${formatPower(Math.abs(telemetry.batteryPower ?? 0))}`}
-                </Text>
-              </View>
-              <Gauge value={telemetry.batterySoc ?? 0} />
-            </Card>
 
-            {/* Stats — 4 across, one row */}
-            <SectionHeader title="Telemetry" />
-            <View style={styles.statsRow4}>
-              <StatusCard
-                compact
-                title="Grid"
-                value={isGridOn ? 'On' : 'Off'}
-                subtitle={isGridOn ? 'Connected' : 'Power cut'}
-                tone={isGridOn ? 'success' : 'danger'}
-                live={isGridOn}
-                testID="card-grid"
-              />
-              <StatusCard
-                compact
-                title="Load"
-                value={formatPower(telemetry.usePower ?? 0)}
-                subtitle={`${(telemetry.useValue ?? 0).toFixed(1)} kWh`}
-                numeric
-                icon={<House size={14} color={colors.textSecondary} strokeWidth={2} />}
-                testID="card-load"
-              />
-              <StatusCard
-                compact
-                title="Battery"
-                value={`${Math.round(telemetry.batterySoc ?? 0)}%`}
-                subtitle={
-                  telemetry.batteryStatus === 'CHARGE'
-                    ? 'Charging'
-                    : telemetry.batteryStatus === 'DISCHARGE'
-                      ? 'Discharging'
-                      : 'Idle'
-                }
-                tone={batteryIsCharging ? 'info' : telemetry.batteryStatus === 'DISCHARGE' ? 'discharge' : 'neutral'}
-                icon={batteryIcon}
-                testID="card-battery"
-              />
-              <StatusCard
-                compact
-                title="Solar"
-                value={formatPower(telemetry.pvPower ?? 0)}
-                subtitle={`${(telemetry.generationValue ?? 0).toFixed(1)} kWh`}
-                tone="brand"
-                live={(telemetry.pvPower ?? 0) > 0}
-                numeric
-                icon={<SunMedium size={14} color={(telemetry.pvPower ?? 0) > 0 ? colors.brand : colors.textDisabled} strokeWidth={2} />}
-                testID="card-solar"
-              />
-            </View>
-
-            {/* System health strip */}
-            <SectionHeader title="System Health" />
-            <Card>
-              {isGeofenced ? (
-                <>
-                  <View style={styles.healthRow}>
-                    <Text style={[styles.healthLabel, { color: colors.textSecondary }]}>Location</Text>
-                    <View style={styles.healthValue}>
-                      <StatusDot
-                        size={7}
-                        color={zoneState?.inside === false ? colors.warning : colors.success}
-                        mode="breathing"
-                      />
-                      <Text
-                        style={[
-                          styles.healthText,
-                          {
-                            color:
-                              zoneState?.inside === false
-                                ? colors.warningText
-                                : colors.successText,
-                          },
-                        ]}
-                      >
-                        {zoneState?.inside === false ? 'Outside home zone' : 'Inside home zone'}
-                      </Text>
+              {/* System health strip */}
+              <SectionHeader title="System Health" />
+              <Card>
+                {isGeofenced ? (
+                  <>
+                    <View style={styles.healthRow}>
+                      <Text style={[styles.healthLabel, { color: colors.textSecondary }]}>Location</Text>
+                      <View style={styles.healthValue}>
+                        <StatusDot
+                          size={7}
+                          color={zoneState?.inside === false ? colors.warning : colors.success}
+                          mode="breathing"
+                        />
+                        <Text
+                          style={[
+                            styles.healthText,
+                            {
+                              color:
+                                zoneState?.inside === false
+                                  ? colors.warningText
+                                  : colors.successText,
+                            },
+                          ]}
+                        >
+                          {zoneState?.inside === false ? 'Outside home zone' : 'Inside home zone'}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
-                  <View style={[styles.healthDivider, { backgroundColor: colors.divider }]} />
-                </>
-              ) : null}
-              <View style={styles.healthRow}>
-                <Text style={[styles.healthLabel, { color: colors.textSecondary }]}>Battery</Text>
-                <View style={styles.healthValue}>
-                  <StatusDot
-                    size={7}
-                    color={getBatteryHealth() === 'Critical' ? colors.danger : colors.success}
-                    mode={getBatteryHealth() === 'Critical' ? 'flashing' : 'steady'}
-                  />
-                  <Text
-                    style={[
-                      styles.healthText,
-                      { color: getBatteryHealth() === 'Critical' ? colors.dangerText : colors.successText },
-                    ]}
-                  >
-                    {getBatteryHealth()} · {telemetry.batterySoc ?? 0}%
-                  </Text>
-                </View>
-              </View>
-              <View style={[styles.healthDivider, { backgroundColor: colors.divider }]} />
-              <View style={styles.healthRow}>
-                <Text style={[styles.healthLabel, { color: colors.textSecondary }]}>Grid Connection</Text>
-                <View style={styles.healthValue}>
-                  <StatusDot size={7} color={isGridOn ? colors.success : colors.danger} mode="steady" />
-                  <Text style={[styles.healthText, { color: isGridOn ? colors.successText : colors.dangerText }]}>
-                    {isGridOn ? 'Stable' : 'Offline'}
-                  </Text>
-                </View>
-              </View>
-              <View style={[styles.healthDivider, { backgroundColor: colors.divider }]} />
-              <View style={styles.healthRow}>
-                <Text style={[styles.healthLabel, { color: colors.textSecondary }]}>Solar Production</Text>
-                <View style={styles.healthValue}>
-                  <StatusDot
-                    size={7}
-                    color={(telemetry.pvPower ?? 0) > 1000 ? colors.success : (telemetry.pvPower ?? 0) > 0 ? colors.warning : colors.textDisabled}
-                    mode="steady"
-                  />
-                  <Text
-                    style={[
-                      styles.healthText,
-                      {
-                        color:
-                          (telemetry.pvPower ?? 0) > 1000
-                            ? colors.successText
-                            : (telemetry.pvPower ?? 0) > 0
-                              ? colors.warningText
-                              : colors.textSecondary,
-                      },
-                    ]}
-                  >
-                    {getSolarHealth()}
-                  </Text>
-                </View>
-              </View>
-            </Card>
-
-            {/* Raw diagnostics drawer — power-user surface, collapsed by default */}
-            <TouchableOpacity
-              onPress={() => setDiagExpanded(!diagExpanded)}
-              accessibilityRole="button"
-              accessibilityLabel="Toggle raw telemetry"
-              style={styles.diagToggle}
-            >
-              <Text style={[styles.diagToggleLabel, { color: colors.textSecondary }]}>
-                Live Data
-              </Text>
-              {diagExpanded ? (
-                <ChevronDown size={16} color={colors.textSecondary} />
-              ) : (
-                <ChevronRight size={16} color={colors.textSecondary} />
-              )}
-            </TouchableOpacity>
-            {diagExpanded ? (
-              <Card style={styles.diagCard}>
-                {rawRows.map(([key, val]) => (
-                  <View key={key} style={styles.rawRow}>
-                    <Text style={[styles.rawKey, { color: colors.textSecondary }]}>{key}</Text>
+                    <View style={[styles.healthDivider, { backgroundColor: colors.divider }]} />
+                  </>
+                ) : null}
+                <View style={styles.healthRow}>
+                  <Text style={[styles.healthLabel, { color: colors.textSecondary }]}>Battery</Text>
+                  <View style={styles.healthValue}>
+                    <StatusDot
+                      size={7}
+                      color={getBatteryHealth() === 'Critical' ? colors.danger : colors.success}
+                      mode={getBatteryHealth() === 'Critical' ? 'flashing' : 'steady'}
+                    />
                     <Text
                       style={[
-                        styles.rawVal,
-                        { color: colors.textPrimary },
-                        key === 'gridRelayStatus' && {
-                          color: val === 'on' ? colors.successText : colors.dangerText,
+                        styles.healthText,
+                        { color: getBatteryHealth() === 'Critical' ? colors.dangerText : colors.successText },
+                      ]}
+                    >
+                      {getBatteryHealth()} · {telemetry.batterySoc ?? 0}%
+                    </Text>
+                  </View>
+                </View>
+                <View style={[styles.healthDivider, { backgroundColor: colors.divider }]} />
+                <View style={styles.healthRow}>
+                  <Text style={[styles.healthLabel, { color: colors.textSecondary }]}>Grid Connection</Text>
+                  <View style={styles.healthValue}>
+                    <StatusDot size={7} color={isGridOn ? colors.success : colors.danger} mode="steady" />
+                    <Text style={[styles.healthText, { color: isGridOn ? colors.successText : colors.dangerText }]}>
+                      {isGridOn ? 'Stable' : 'Offline'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={[styles.healthDivider, { backgroundColor: colors.divider }]} />
+                <View style={styles.healthRow}>
+                  <Text style={[styles.healthLabel, { color: colors.textSecondary }]}>Solar Production</Text>
+                  <View style={styles.healthValue}>
+                    <StatusDot
+                      size={7}
+                      color={(telemetry.pvPower ?? 0) > 1000 ? colors.success : (telemetry.pvPower ?? 0) > 0 ? colors.warning : colors.textDisabled}
+                      mode="steady"
+                    />
+                    <Text
+                      style={[
+                        styles.healthText,
+                        {
+                          color:
+                            (telemetry.pvPower ?? 0) > 1000
+                              ? colors.successText
+                              : (telemetry.pvPower ?? 0) > 0
+                                ? colors.warningText
+                                : colors.textSecondary,
                         },
                       ]}
                     >
-                      {val}
+                      {getSolarHealth()}
                     </Text>
                   </View>
-                ))}
+                </View>
               </Card>
-            ) : null}
 
-            <View style={{ height: Spacing['3xl'] }} />
-          </>
-        ) : null}
-      </ScrollView>
+              {/* Raw diagnostics drawer — power-user surface, collapsed by default */}
+              <TouchableOpacity
+                onPress={() => setDiagExpanded(!diagExpanded)}
+                accessibilityRole="button"
+                accessibilityLabel="Toggle raw telemetry"
+                style={styles.diagToggle}
+              >
+                <Text style={[styles.diagToggleLabel, { color: colors.textSecondary }]}>
+                  Live Data
+                </Text>
+                {diagExpanded ? (
+                  <ChevronDown size={16} color={colors.textSecondary} />
+                ) : (
+                  <ChevronRight size={16} color={colors.textSecondary} />
+                )}
+              </TouchableOpacity>
+              {diagExpanded ? (
+                <Card style={styles.diagCard}>
+                  {rawRows.map(([key, val]) => (
+                    <View key={key} style={styles.rawRow}>
+                      <Text style={[styles.rawKey, { color: colors.textSecondary }]}>{key}</Text>
+                      <Text
+                        style={[
+                          styles.rawVal,
+                          { color: colors.textPrimary },
+                          key === 'gridRelayStatus' && {
+                            color: val === 'on' ? colors.successText : colors.dangerText,
+                          },
+                        ]}
+                      >
+                        {val}
+                      </Text>
+                    </View>
+                  ))}
+                </Card>
+              ) : null}
+
+              <View style={{ height: Spacing['3xl'] }} />
+            </>
+          ) : null}
+        </ScrollView>
+      </TabSwipeRegion>
     </View>
   );
 }

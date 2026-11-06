@@ -4,9 +4,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme, Typography, Spacing, PAGE_GUTTER } from '../theme';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import packageJson from '../../package.json';
 import { ScreenHeader, HeaderAction, Card, SectionHeader, Badge } from '../components/ui';
-import { ArrowLeft, ChevronRight, GitBranch, ShieldCheck, Scale, SunMedium } from 'lucide-react-native';
+import { ArrowLeft, ChevronRight, GitBranch, ShieldCheck, Scale, SunMedium } from '../components/icons';
 
 type RootStackParamList = {
   About: undefined;
@@ -75,7 +76,7 @@ export function AboutScreen() {
   ];
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={[styles.root, { backgroundColor: colors.background }]}>
       <ScreenHeader
         title="About"
         left={
@@ -139,7 +140,7 @@ export function AboutScreen() {
           <Badge label={`v${packageJson.version}`} tone="neutral" />
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
